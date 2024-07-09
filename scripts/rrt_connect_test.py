@@ -77,7 +77,7 @@ class PlanarPruner:
         self.prune_point_2 = self.load_urdf("sphere2.urdf", self.prune_point_2_pos, radius=self.radius)
 
         # Get manipulator
-        self.robotId = p.loadURDF("./urdf/three_link_manipulator.urdf", [start_x, 0, 0], useFixedBase=True)
+        self.robotId = p.loadURDF("./urdf/rrr_manipulator.urdf", [start_x, 0, 0], useFixedBase=True)
         self.num_joints = p.getNumJoints(self.robotId)
         self.num_static_joints = 4 # static joints in the end-effector
         self.num_controllable_joints = self.num_joints - self.num_static_joints
@@ -141,14 +141,13 @@ def main():
             max_iterations=5000
         )
 
-        iteration = i
-
         if path is not None:
             final_joint_positions = path[-1]
             planar_pruner.set_joint_positions(final_joint_positions)
-            final_position, final_orientation = p.getLinkState(planar_pruner.robotId, planar_pruner.gripper_idx)[:2]
+            final_position, final_orientation = p.getLinkState(planar_pruner.robotId, planar_pruner.gripper_idx)[:2] # getting position and orientation
 
             if planar_pruner.check_pose_within_tolerance(final_position, final_orientation, goal_position, goal_orientation, pos_tolerance, ori_tolerance):
+                iteration = i
                 break
             else:
                 path = None  # Reset path if not within tolerance

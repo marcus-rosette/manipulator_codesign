@@ -64,7 +64,7 @@ def main():
     radius = 0.05 
 
     # Load the manipulator
-    manipulatorId = planar_pruner.load_urdf("./urdf/three_link_manipulator.urdf", [start_x, 0, 0])
+    manipulatorId = planar_pruner.load_urdf("./urdf/rpr_manipulator.urdf", [start_x, 0, 0])
 
     # Set initial joint positions
     initial_positions = [0.0, 0.0, 0.0]  # Example initial positions for the three joints
@@ -86,14 +86,14 @@ def main():
     # Run the simulation
     for i in range(num_steps):
         # Example control: Set target position for the joints
-        target_positions = [-1, -0.25, -0.25]  # Example target positions for the three joints
+        target_positions = [-0.1, -0.74, -0.75]  # Example target positions for the three joints
         for j in range(3):
             p.setJointMotorControl2(
                 bodyUniqueId=manipulatorId,
                 jointIndex=j,
                 controlMode=p.POSITION_CONTROL,
                 targetPosition=target_positions[j],
-                force=100
+                force=500
             )
         p.stepSimulation()
         time.sleep(1 / sim_rate)  # Sleep to maintain a simulation step rate

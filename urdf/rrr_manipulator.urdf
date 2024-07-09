@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<robot name="three_link_manipulator">
+<robot name="rrr_manipulator">
 
   <!-- Base Link -->
   <link name="base_link">
