@@ -2,11 +2,9 @@ import pybullet as p
 import pybullet_data
 import numpy as np
 import time
-from pybullet_planning import (
-    connect, disconnect, wait_for_user, load_pybullet, set_joint_positions,
-    joints_from_names, rrt_connect, plan_joint_motion,
-    get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn
-)
+from scipy.spatial.transform import Rotation as R
+from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
+
 
 class PlanarPruner:
     def __init__(self):
@@ -36,6 +34,9 @@ class PlanarPruner:
         # Load a plane URDF 
         self.planeId = p.loadURDF("plane.urdf")
 
+        # Index of gripper (from urdf)
+        self.gripper_idx = 6
+
         self.start_sim()
 
     def load_urdf(self, urdf_name, start_pos=[0, 0, 0], start_orientation=[0, 0, 0], color=None, fix_base=True, radius=None):
@@ -57,7 +58,7 @@ class PlanarPruner:
 
         # Define the starting position of the pruning points
         self.prune_point_0_pos = [start_x, start_y, 1.55] 
-        self.prune_point_1_pos = [start_x, start_y - 0.05, 1.25] 
+        self.prune_point_1_pos = [start_x, start_y - 0.05, 1.05] 
         self.prune_point_2_pos = [start_x, start_y + 0.05, 0.55] 
         self.radius = 0.05 
 
@@ -66,15 +67,20 @@ class PlanarPruner:
         self.top_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, start_y, 1.5], [0, np.pi / 2, 0])
         self.mid_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, start_y, 1], [0, np.pi / 2, 0])
         self.bottom_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, start_y, 0.5], [0, np.pi / 2, 0])
+        
+        # Get list of collidable objects
+        self.collision_objects = [self.leader_branchId, self.top_branchId, self.mid_branchId, self.bottom_branchId, self.planeId]
 
         # Load the pruning points
+        self.prune_point_0 = self.load_urdf("sphere2.urdf", self.prune_point_0_pos, radius=self.radius)
         self.prune_point_1 = self.load_urdf("sphere2.urdf", self.prune_point_1_pos, radius=self.radius)
         self.prune_point_2 = self.load_urdf("sphere2.urdf", self.prune_point_2_pos, radius=self.radius)
 
         # Get manipulator
         self.robotId = p.loadURDF("./urdf/three_link_manipulator.urdf", [start_x, 0, 0], useFixedBase=True)
         self.num_joints = p.getNumJoints(self.robotId)
-        self.num_controllable_joints = self.num_joints - 4  # 4 for the static joints in the end-effector
+        self.num_static_joints = 4 # static joints in the end-effector
+        self.num_controllable_joints = self.num_joints - self.num_static_joints
         self.joint_limits = [p.getJointInfo(self.robotId, i)[8:10] for i in range(self.num_controllable_joints)]
 
     def set_joint_positions(self, joint_positions):
@@ -87,42 +93,70 @@ class PlanarPruner:
     def is_collision(self):
         return len(p.getContactPoints(self.robotId)) > 0
     
-    def inverse_kinematics(self, position):
-        joint_positions = p.calculateInverseKinematics(self.robotId, 6, position)
+    def inverse_kinematics(self, position, orientation):
+        joint_positions = p.calculateInverseKinematics(self.robotId, self.gripper_idx, position, orientation)
         return joint_positions
+    
+    def check_pose_within_tolerance(self, final_position, final_orientation, target_position, target_orientation, pos_tolerance, ori_tolerance):
+        pos_diff = np.linalg.norm(np.array(final_position) - np.array(target_position))
+        ori_diff = np.linalg.norm(R.from_quat(final_orientation).as_rotvec() - R.from_quat(target_orientation).as_rotvec())
+        return pos_diff <= pos_tolerance and ori_diff <= ori_tolerance
 
 def main():
     # Initialize the planar pruner
     planar_pruner = PlanarPruner()
 
-    # Define the start and goal positions for the end-effector
-    start_pos = [0.0, 0.0, 0.0]
-    goal_pos = planar_pruner.prune_point_1_pos
+    # Define the goal position and orientation
+    goal_position = planar_pruner.prune_point_1_pos
+    goal_orientation = p.getQuaternionFromEuler([-1.57, 0, 0])
 
-    # Get the start and goal joint configurations using inverse kinematics
-    start_conf = planar_pruner.inverse_kinematics(start_pos)
-    goal_conf = planar_pruner.inverse_kinematics(goal_pos)
+    # Define tolerances
+    pos_tolerance = 0.025
+    ori_tolerance = 0.5  # In radians
+
+    # Define the start position for the end-effector (assuming straight up configuration)
+    start_position = [0.0, 0.0, 0.0]
+    start_orientation = [0, 0, 0]
+
+    # Get the start joint configuration using inverse kinematics
+    start_conf = planar_pruner.inverse_kinematics(start_position, p.getQuaternionFromEuler(start_orientation))
 
     controllable_joints = list(range(planar_pruner.num_controllable_joints))
     distance_fn = get_distance_fn(planar_pruner.robotId, controllable_joints)
     sample_fn = get_sample_fn(planar_pruner.robotId, controllable_joints)
     extend_fn = get_extend_fn(planar_pruner.robotId, controllable_joints)
-    collision_fn = get_collision_fn(planar_pruner.robotId, controllable_joints, [planar_pruner.bottom_branchId, planar_pruner.mid_branchId, planar_pruner.top_branchId, planar_pruner.planeId])
+    collision_fn = get_collision_fn(planar_pruner.robotId, controllable_joints, planar_pruner.collision_objects)
 
-    # Use the pybullet_planning RRT-Connect to plan a path in joint space
-    path = rrt_connect(
-        start_conf, goal_conf,
-        extend_fn=extend_fn,
-        collision_fn=collision_fn,
-        distance_fn=distance_fn,
-        sample_fn=sample_fn,
-        max_iterations=5000
-    )
+    max_iterations = 2000
+    path = None
+
+    goal_conf = planar_pruner.inverse_kinematics(goal_position, goal_orientation)
+    for i in range(max_iterations):
+        path = rrt_connect(
+            start_conf, goal_conf,
+            extend_fn=extend_fn,
+            collision_fn=collision_fn,
+            distance_fn=distance_fn,
+            sample_fn=sample_fn,
+            max_iterations=5000
+        )
+
+        iteration = i
+
+        if path is not None:
+            final_joint_positions = path[-1]
+            planar_pruner.set_joint_positions(final_joint_positions)
+            final_position, final_orientation = p.getLinkState(planar_pruner.robotId, planar_pruner.gripper_idx)[:2]
+
+            if planar_pruner.check_pose_within_tolerance(final_position, final_orientation, goal_position, goal_orientation, pos_tolerance, ori_tolerance):
+                break
+            else:
+                path = None  # Reset path if not within tolerance
 
     if path is None:
-        print("No path found!")
+        print("No path found within the specified tolerances!")
     else:
-        print("Path found! Executing path...")
+        print(f"Path found within tolerances on iteration {iteration}! Executing path...")
         for config in path:
             planar_pruner.set_joint_positions(config)
             p.stepSimulation()
@@ -134,7 +168,7 @@ def main():
         while True:
             planar_pruner.set_joint_positions(final_position)
             p.stepSimulation()
-            time.sleep(0.05)
+            time.sleep(0.1)
 
     p.disconnect()
 
