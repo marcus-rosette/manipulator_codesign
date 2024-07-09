@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<robot name="leader_branch">
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <cylinder length="1.6" radius="0.04"/>
+      </geometry>
+      <material name="brown">
+        <color rgba="0.545 0.271 0.075 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder length="1.6" radius="0.04"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>
