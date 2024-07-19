@@ -144,7 +144,7 @@
   <joint name="joint4" type="fixed">
     <parent link="link3"/>
     <child link="wrist"/>
-    <origin xyz="0 0 0.025" rpy="0 0 0"/>
+    <origin xyz="0 0 0.025" rpy="0 0 1.57"/>
   </joint>
 
   <!-- Left Finger Link -->
