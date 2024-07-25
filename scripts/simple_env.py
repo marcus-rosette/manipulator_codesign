@@ -67,11 +67,10 @@ class PlanarPruner:
 
         if planar:
             jac_t = np.array(jac_t)[1:3]
-            manipulability_measure = np.sqrt(np.linalg.det(jac_t @ jac_t.T))
-        else:
-            manipulability_measure = np.sqrt(np.linalg.det(jacobian @ jacobian.T))
+            jac_r = np.array(jac_r)[0]
+            jacobian = np.vstack((jac_t, jac_r))
 
-        return manipulability_measure
+        return np.sqrt(np.linalg.det(jacobian @ jacobian.T))
 
 
 def main():
@@ -83,9 +82,14 @@ def main():
     # Set initial joint positions
     num_joints = p.getNumJoints(manipulatorId)
 
+    target_ee_pos = [0.5, 0.75, 0.85]
+
     # Set target joint position 
-    target_positions = [-0.5, 1, -0.5, -1] 
+    target_positions = [-0.04336070143909493, -0.13549289807162315, -0.38391860361870744, -1.026727607021244] 
     # target_positions = [-1.57, 0.5, -1, 1, -1.5, 0]
+
+    # target_positions = np.array(p.calculateInverseKinematics(manipulatorId, num_joints - 1, target_ee_pos))
+    # print(target_positions)
 
     ee_index = p.getNumJoints(manipulatorId) - 1
 
@@ -103,7 +107,7 @@ def main():
             )
 
     # Wait until the manipulator reaches the target positions
-    tolerance = 0.01  # Position tolerance
+    tolerance = 0.02  # Position tolerance
     while True:
         joint_states = [p.getJointState(manipulatorId, i)[0] for i in range(num_joints)]
         if all(abs(joint_states[i] - target_positions[i]) < tolerance for i in range(len(target_positions))):

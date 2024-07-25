@@ -90,22 +90,23 @@ class PlanarPruner:
         return (pos_diff <= pos_tolerance and np.abs(ori_diff) <= ori_tolerance, pos_diff, ori_diff)
 
     def calculate_manipulability(self, joint_positions, planar=True):
+        joint_positions = list(joint_positions)
         zero_vec = [0.0] * len(joint_positions)
         jac_t, jac_r = p.calculateJacobian(self.robotId, self.end_effector_index, [0, 0, 0], joint_positions, zero_vec, zero_vec)
         jacobian = np.vstack((jac_t, jac_r))
         # print(np.linalg.matrix_rank(jacobian))
         
-        # Check for singularity
-        if np.linalg.matrix_rank(jacobian) < self.num_controllable_joints:
-            print("\nSingularity detected: Manipulability is zero.")
-            return 0.0
+        # # Check for singularity
+        # if np.linalg.matrix_rank(jacobian) < self.num_controllable_joints:
+        #     print("\nSingularity detected: Manipulability is zero.")
+        #     return 0.0
         
         if planar:
             jac_t = np.array(jac_t)[1:3]
-            manipulability_measure = np.sqrt(np.linalg.det(jac_t @ jac_t.T))
-        else:
-            manipulability_measure = np.sqrt(np.linalg.det(jacobian @ jacobian.T))
-        return manipulability_measure
+            jac_r = np.array(jac_r)[0]
+            jacobian = np.vstack((jac_t, jac_r))
+
+        return np.sqrt(np.linalg.det(jacobian @ jacobian.T))
 
     def vector_field_sample_fn(self, goal_position, goal_orientation, alpha=0.8):
         def sample():
@@ -138,8 +139,8 @@ def main():
     start_conf = planar_pruner.inverse_kinematics(start_end_effector_pos, start_end_effector_orientation)
     controllable_joints = list(range(planar_pruner.num_controllable_joints))
     distance_fn = get_distance_fn(planar_pruner.robotId, controllable_joints)
-    sample_fn = planar_pruner.vector_field_sample_fn(goal_position, goal_orientation, alpha=0.7)
-    # sample_fn = get_sample_fn(planar_pruner.robotId, controllable_joints)
+    # sample_fn = planar_pruner.vector_field_sample_fn(goal_position, goal_orientation, alpha=0.7)
+    sample_fn = get_sample_fn(planar_pruner.robotId, controllable_joints)
     extend_fn = get_extend_fn(planar_pruner.robotId, controllable_joints)
     collision_fn = get_collision_fn(planar_pruner.robotId, controllable_joints, planar_pruner.collision_objects)
 
@@ -175,7 +176,9 @@ def main():
                 iteration = i
                 num_feasible_path += 1
                 # print(f'\nTarget position: {goal_position}, Target orientation: {p.getEulerFromQuaternion(goal_orientation)}')
-                # print(f'Final position: {np.round(final_end_effector_pos, 2)}, Final orientation: {np.round(p.getEulerFromQuaternion(final_end_effector_orientation), 2)}')
+                joint_states = [p.getJointState(planar_pruner.robotId, i)[0] for i in range(planar_pruner.num_joints)]
+                print("Current joint configuration:", joint_states)
+                print(f'Final position: {np.round(final_end_effector_pos, 2)}, Final orientation: {np.round(p.getEulerFromQuaternion(final_end_effector_orientation), 2)}')
                 # print(f"Position error: {np.round(pos_diff, 2)}, Orientation error: {np.round(ori_diff, 2)}")
 
                 # Calculate and print manipulability
@@ -196,6 +199,7 @@ def main():
         print(f"Path found within tolerances on iteration {iteration}! Executing path...")
         print(f"Number of feasible paths found: {num_feasible_path}")
         print(f"Highest manipulability found: {manipulability_max}")
+
         for config in path:
             planar_pruner.set_joint_positions(config)
             p.stepSimulation()

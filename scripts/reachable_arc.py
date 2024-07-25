@@ -33,7 +33,7 @@ class PlanarPruner:
         start_x = 0.5
         start_y = 1.0
         self.prune_point_0_pos = [start_x, start_y, 1.55] 
-        self.prune_point_1_pos = [start_x, start_y - 0.05, 1.1] 
+        self.prune_point_1_pos = [start_x, start_y - 0.25, 0.85] 
         self.prune_point_2_pos = [start_x, start_y + 0.05, 0.55] 
         self.radius = 0.05 
 
@@ -116,17 +116,17 @@ class PlanarPruner:
         jac_t, jac_r = p.calculateJacobian(self.robotId, self.end_effector_index, [0, 0, 0], joint_positions, zero_vec, zero_vec)
         jacobian = np.vstack((jac_t, jac_r))
         
-        # Check for singularity
-        if np.linalg.matrix_rank(jacobian) < self.num_controllable_joints:
-            print("\nSingularity detected: Manipulability is zero.")
-            return 0.0
+        # # Check for singularity
+        # if np.linalg.matrix_rank(jacobian) < self.num_controllable_joints:
+        #     print("\nSingularity detected: Manipulability is zero.")
+        #     return 0.0
         
         if planar:
             jac_t = np.array(jac_t)[1:3]
-            manipulability_measure = np.sqrt(np.linalg.det(jac_t @ jac_t.T))
-        else:
-            manipulability_measure = np.sqrt(np.linalg.det(jacobian @ jacobian.T))
-        return manipulability_measure
+            jac_r = np.array(jac_r)[0]
+            jacobian = np.vstack((jac_t, jac_r))
+
+        return np.sqrt(np.linalg.det(jacobian @ jacobian.T))
 
     def vector_field_sample_fn(self, goal_position, goal_orientation, alpha=0.8):
         def sample():
@@ -138,12 +138,13 @@ class PlanarPruner:
             
             vector_to_goal = np.array(goal_position) - end_effector_position
             guided_position = end_effector_position + vector_to_goal
-            guided_conf = np.array(self.inverse_kinematics(guided_position, goal_orientation))
+            # guided_conf = np.array(self.inverse_kinematics(guided_position, goal_orientation))
+            guided_conf = np.array(p.calculateInverseKinematics(self.robotId, self.end_effector_index, guided_position))
             final_conf = (1 - alpha) * random_conf + alpha * guided_conf
             
             return final_conf
         return sample
-    
+      
     def rrtc_loop(self, goal_coord, goal_ori, start_conf, goal_conf, sample_fn, distance_fn, extend_fn, collision_fn, pos_tol=0.1, ori_tol=0.5, planar=True, max_iter=1000):
         manipulability_max = 0
         path = None
@@ -155,7 +156,7 @@ class PlanarPruner:
                 collision_fn=collision_fn,
                 distance_fn=distance_fn,
                 sample_fn=sample_fn,
-                max_iterations=10000
+                max_iterations=5000
             )
 
             if path is not None:
@@ -205,8 +206,9 @@ def main():
     sys_manipulability = np.zeros((num_points, 1))
 
     for point in range(num_points):
-        # sample_fn = planar_pruner.vector_field_sample_fn(goal_coords[point], goal_orientations[point], alpha=0.5)
-        sample_fn = get_sample_fn(planar_pruner.robotId, controllable_joints)
+        sample_fn = planar_pruner.vector_field_sample_fn(goal_coords[point], goal_orientations[point], alpha=0.4)
+        # sample_fn = planar_pruner.new_sample_fn(goal_coords[point], bias=0.1)
+        # sample_fn = get_sample_fn(planar_pruner.robotId, controllable_joints)
 
         goal_conf = planar_pruner.inverse_kinematics(goal_coords[point], goal_orientations[point])
         
@@ -219,7 +221,7 @@ def main():
                                                             pos_tol=0.1,
                                                             ori_tol=0.5,
                                                             planar=True, 
-                                                            max_iter=250)
+                                                            max_iter=500)
         
         print(f"Highest manipulability found: {np.round(manipulability_max, 5)}")
         sys_manipulability[point] = manipulability_max
