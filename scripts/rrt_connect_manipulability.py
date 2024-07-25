@@ -29,7 +29,7 @@ class PlanarPruner:
 
     def start_sim(self):
         start_x = 0.5
-        start_y = 1.0
+        start_y = 1
         self.prune_point_0_pos = [start_x, start_y, 1.55] 
         self.prune_point_1_pos = [start_x, start_y - 0.05, 1.1] 
         self.prune_point_2_pos = [start_x, start_y + 0.05, 0.55] 
@@ -45,7 +45,7 @@ class PlanarPruner:
         self.prune_point_1 = self.load_urdf("sphere2.urdf", self.prune_point_1_pos, radius=self.radius)
         self.prune_point_2 = self.load_urdf("sphere2.urdf", self.prune_point_2_pos, radius=self.radius)
 
-        self.robotId = p.loadURDF("./urdf/6r_manipulator.urdf", [start_x, 0, 0], useFixedBase=True)
+        self.robotId = p.loadURDF("./urdf/prrr_manipulator.urdf", [start_x, 0, 0], useFixedBase=True)
         self.num_joints = p.getNumJoints(self.robotId)
 
         # Source the end-effector index
@@ -89,9 +89,9 @@ class PlanarPruner:
         # print(pos_diff, ori_diff)
         return (pos_diff <= pos_tolerance and np.abs(ori_diff) <= ori_tolerance, pos_diff, ori_diff)
 
-    def calculate_manipulability(self, joint_positions, end_effector_pos):
+    def calculate_manipulability(self, joint_positions, planar=True):
         zero_vec = [0.0] * len(joint_positions)
-        jac_t, jac_r = p.calculateJacobian(self.robotId, self.end_effector_index, end_effector_pos, joint_positions, zero_vec, zero_vec)
+        jac_t, jac_r = p.calculateJacobian(self.robotId, self.end_effector_index, [0, 0, 0], joint_positions, zero_vec, zero_vec)
         jacobian = np.vstack((jac_t, jac_r))
         # print(np.linalg.matrix_rank(jacobian))
         
@@ -100,8 +100,11 @@ class PlanarPruner:
             print("\nSingularity detected: Manipulability is zero.")
             return 0.0
         
-        manipulability_measure = np.sqrt(np.linalg.det(jacobian @ jacobian.T))
-        # manipulability_measure = np.sqrt(np.linalg.det(jac_t @ np.array(jac_t).T))
+        if planar:
+            jac_t = np.array(jac_t)[1:3]
+            manipulability_measure = np.sqrt(np.linalg.det(jac_t @ jac_t.T))
+        else:
+            manipulability_measure = np.sqrt(np.linalg.det(jacobian @ jacobian.T))
         return manipulability_measure
 
     def vector_field_sample_fn(self, goal_position, goal_orientation, alpha=0.8):
@@ -123,6 +126,7 @@ class PlanarPruner:
 def main():
     planar_pruner = PlanarPruner()
     goal_position = planar_pruner.prune_point_1_pos
+    # goal_position = [0.5, 0.6, 0.6]
     goal_orientation = p.getQuaternionFromEuler([0, 1.57, 1.57])
     pos_tolerance = 0.1
     ori_tolerance = 0.5
@@ -134,12 +138,12 @@ def main():
     start_conf = planar_pruner.inverse_kinematics(start_end_effector_pos, start_end_effector_orientation)
     controllable_joints = list(range(planar_pruner.num_controllable_joints))
     distance_fn = get_distance_fn(planar_pruner.robotId, controllable_joints)
-    sample_fn = planar_pruner.vector_field_sample_fn(goal_position, goal_orientation, alpha=0.9)
+    sample_fn = planar_pruner.vector_field_sample_fn(goal_position, goal_orientation, alpha=0.7)
     # sample_fn = get_sample_fn(planar_pruner.robotId, controllable_joints)
     extend_fn = get_extend_fn(planar_pruner.robotId, controllable_joints)
     collision_fn = get_collision_fn(planar_pruner.robotId, controllable_joints, planar_pruner.collision_objects)
 
-    max_iterations = 500
+    max_iterations = 5000
     num_feasible_path = 0
     manipulability_max = 0
     path = None
@@ -175,7 +179,7 @@ def main():
                 # print(f"Position error: {np.round(pos_diff, 2)}, Orientation error: {np.round(ori_diff, 2)}")
 
                 # Calculate and print manipulability
-                manipulability = planar_pruner.calculate_manipulability(final_joint_positions, final_end_effector_pos)
+                manipulability = planar_pruner.calculate_manipulability(final_joint_positions, planar=True)
                 if manipulability > manipulability_max:
                     manipulability_max = manipulability
                 print(f'Manipulability at final position: {np.round(manipulability, 5)}')

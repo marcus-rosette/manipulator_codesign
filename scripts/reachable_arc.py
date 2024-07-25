@@ -1,24 +1,24 @@
 import pybullet as p
 import pybullet_data
 import numpy as np
-import time
-from scipy.spatial.transform import Rotation as R
 from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
 
+
 class PlanarPruner:
-    def __init__(self):
+    def __init__(self, urdf_filename="rrr_manipulator"):
         self.physicsClient = p.connect(p.GUI)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
-        p.setGravity(0, 0, -10)
+        p.setGravity(0, 0, -9.81)
         camera_distance = 2
         camera_yaw = 90
         camera_pitch = -10
         camera_target_position = [0, 0.75, 0.75]
         p.resetDebugVisualizerCamera(camera_distance, camera_yaw, camera_pitch, camera_target_position)
-        self.planeId = p.loadURDF("plane.urdf")
-        self.start_sim()
 
-    def load_urdf(self, urdf_name, start_pos=[0, 0, 0], start_orientation=[0, 0, 0], color=None, fix_base=True, radius=None):
+        self.urdf_filename = urdf_filename
+        self.load_objects()
+
+    def load_urdf(self, urdf_name, start_pos=[0, 0, 0], start_orientation=[0, 0, 0], fix_base=True, radius=None):
         orientation = p.getQuaternionFromEuler(start_orientation)
         if radius is None:
             objectId = p.loadURDF(urdf_name, start_pos, orientation, useFixedBase=fix_base)
@@ -27,7 +27,9 @@ class PlanarPruner:
             p.changeVisualShape(objectId, -1, rgbaColor=[0, 1, 0, 1]) 
         return objectId
 
-    def start_sim(self):
+    def load_objects(self):
+        self.planeId = p.loadURDF("plane.urdf")
+
         start_x = 0.5
         start_y = 1.0
         self.prune_point_0_pos = [start_x, start_y, 1.55] 
@@ -45,7 +47,7 @@ class PlanarPruner:
         self.prune_point_1 = self.load_urdf("sphere2.urdf", self.prune_point_1_pos, radius=self.radius)
         self.prune_point_2 = self.load_urdf("sphere2.urdf", self.prune_point_2_pos, radius=self.radius)
 
-        self.robotId = p.loadURDF("./urdf/6r_manipulator.urdf", [start_x, 0, 0], useFixedBase=True)
+        self.robotId = p.loadURDF(f"./urdf/{self.urdf_filename}.urdf", [start_x, 0, 0], useFixedBase=True)
         self.num_joints = p.getNumJoints(self.robotId)
 
         # Source the end-effector index
@@ -60,7 +62,7 @@ class PlanarPruner:
         # Extract joint limits from urdf
         self.joint_limits = [p.getJointInfo(self.robotId, i)[8:10] for i in range(self.num_controllable_joints)]
 
-    def prune_arc(self, prune_point, radius, allowance_angle, num_points):
+    def prune_arc(self, prune_point, radius, allowance_angle, num_points, x_ori_default=0.0, z_ori_default=np.pi/2):
         # Define theta as a descrete array
         theta = np.linspace(-allowance_angle, allowance_angle, num_points)
 
@@ -70,9 +72,17 @@ class PlanarPruner:
         z = radius * np.sin(theta) + prune_point[2] 
 
         # Calculate orientation angles
-        angles = np.arctan2(prune_point[1] - z, prune_point[0] - y)
+        arc_angles = np.arctan2(prune_point[1] - z, prune_point[0] - y)
 
-        return np.vstack((x, y, z)), angles
+        arc_coords = np.vstack((x, y, z))
+
+        goal_coords = np.zeros((num_points, 3)) # 3 for x, y, z
+        goal_orientations = np.zeros((num_points, 4)) # 4 for quaternion
+        for i in range(num_points):
+            goal_coords[i] = [arc_coords[0][i], arc_coords[1][i], arc_coords[2][i]]
+            goal_orientations[i] = p.getQuaternionFromEuler([x_ori_default, arc_angles[i] + np.pi + 1.57, z_ori_default])
+
+        return goal_coords, goal_orientations
         
     def set_joint_positions(self, joint_positions):
         for i in range(self.num_controllable_joints):
@@ -99,11 +109,11 @@ class PlanarPruner:
     def check_pose_within_tolerance(self, final_position, final_orientation, target_position, target_orientation, pos_tolerance, ori_tolerance):
         pos_diff = np.linalg.norm(np.array(final_position) - np.array(target_position))
         ori_diff = np.pi - self.quaternion_angle_difference(np.array(target_orientation), np.array(final_orientation))
-        return (pos_diff <= pos_tolerance and np.abs(ori_diff) <= ori_tolerance, pos_diff, ori_diff)
+        return pos_diff <= pos_tolerance and np.abs(ori_diff) <= ori_tolerance
 
-    def calculate_manipulability(self, joint_positions, end_effector_pos):
+    def calculate_manipulability(self, joint_positions, planar=True):
         zero_vec = [0.0] * len(joint_positions)
-        jac_t, jac_r = p.calculateJacobian(self.robotId, self.end_effector_index, end_effector_pos, joint_positions, zero_vec, zero_vec)
+        jac_t, jac_r = p.calculateJacobian(self.robotId, self.end_effector_index, [0, 0, 0], joint_positions, zero_vec, zero_vec)
         jacobian = np.vstack((jac_t, jac_r))
         
         # Check for singularity
@@ -111,7 +121,11 @@ class PlanarPruner:
             print("\nSingularity detected: Manipulability is zero.")
             return 0.0
         
-        manipulability_measure = np.sqrt(np.linalg.det(jacobian @ jacobian.T))
+        if planar:
+            jac_t = np.array(jac_t)[1:3]
+            manipulability_measure = np.sqrt(np.linalg.det(jac_t @ jac_t.T))
+        else:
+            manipulability_measure = np.sqrt(np.linalg.det(jacobian @ jacobian.T))
         return manipulability_measure
 
     def vector_field_sample_fn(self, goal_position, goal_orientation, alpha=0.8):
@@ -129,26 +143,54 @@ class PlanarPruner:
             
             return final_conf
         return sample
+    
+    def rrtc_loop(self, goal_coord, goal_ori, start_conf, goal_conf, sample_fn, distance_fn, extend_fn, collision_fn, pos_tol=0.1, ori_tol=0.5, planar=True, max_iter=1000):
+        manipulability_max = 0
+        path = None
+        
+        for i in range(max_iter):
+            path = rrt_connect(
+                start_conf, goal_conf,
+                extend_fn=extend_fn,
+                collision_fn=collision_fn,
+                distance_fn=distance_fn,
+                sample_fn=sample_fn,
+                max_iterations=10000
+            )
+
+            if path is not None:
+                final_joint_positions = path[-1]
+                self.set_joint_positions(final_joint_positions)
+                final_end_effector_state = p.getLinkState(self.robotId, self.end_effector_index)
+                final_end_effector_pos = np.array(final_end_effector_state[0])
+                final_end_effector_orientation = np.array(final_end_effector_state[1])
+
+                within_tol = self.check_pose_within_tolerance(final_end_effector_pos, final_end_effector_orientation, goal_coord, goal_ori, pos_tol, ori_tol)
+                if within_tol:
+
+                    # Calculate and print manipulability
+                    manipulability = self.calculate_manipulability(final_joint_positions, planar=planar)
+                    if manipulability > manipulability_max:
+                        manipulability_max = manipulability
+                else:
+                    path = None
+
+        if path is None:
+            return manipulability_max
+    
 
 def main():
-    planar_pruner = PlanarPruner()
+    planar_pruner = PlanarPruner(urdf_filename="prrr_manipulator")
     prune_point = planar_pruner.prune_point_1_pos
 
-    num_points = 60
-    x_ori_default = 0.0
-    z_ori_default = 1.57
+    num_points = 10
 
-    arc_coords, arc_angles = planar_pruner.prune_arc(prune_point, 0.1, np.deg2rad(30), num_points)
-
-    goal_coords = np.zeros((num_points, 3)) # 3 for x, y, z
-    goal_orientations = np.zeros((num_points, 4)) # 4 for quaternion
-    for i in range(num_points):
-        goal_coords[i] = [arc_coords[0][i], arc_coords[1][i], arc_coords[2][i]]
-        goal_orientations[i] = p.getQuaternionFromEuler([x_ori_default, arc_angles[i] + np.pi + 1.57, z_ori_default])
-        # planar_pruner.load_urdf("sphere2.urdf", goal_coords[i], radius=0.025)
-
-    pos_tolerance = 0.1
-    ori_tolerance = 0.5
+    goal_coords, goal_orientations = planar_pruner.prune_arc(prune_point,
+                                                              radius=0.1, 
+                                                              allowance_angle=np.deg2rad(30), 
+                                                              num_points=num_points, 
+                                                              x_ori_default=0, 
+                                                              z_ori_default=np.pi/2)
 
     start_end_effector_state = p.getLinkState(planar_pruner.robotId, planar_pruner.end_effector_index)
     start_end_effector_pos = np.array(start_end_effector_state[0])
@@ -160,72 +202,31 @@ def main():
     extend_fn = get_extend_fn(planar_pruner.robotId, controllable_joints)
     collision_fn = get_collision_fn(planar_pruner.robotId, controllable_joints, planar_pruner.collision_objects)
 
-    max_iterations = 250
-    sys_manipulability = np.zeros((num_points))
-    path = None
+    sys_manipulability = np.zeros((num_points, 1))
 
     for point in range(num_points):
-        sample_fn = planar_pruner.vector_field_sample_fn(goal_coords[point], goal_orientations[point], alpha=0.9)
-
-        num_feasible_path = 0
-        manipulability_max = 0
+        # sample_fn = planar_pruner.vector_field_sample_fn(goal_coords[point], goal_orientations[point], alpha=0.5)
+        sample_fn = get_sample_fn(planar_pruner.robotId, controllable_joints)
 
         goal_conf = planar_pruner.inverse_kinematics(goal_coords[point], goal_orientations[point])
-        for i in range(max_iterations):
-            path = rrt_connect(
-                start_conf, goal_conf,
-                extend_fn=extend_fn,
-                collision_fn=collision_fn,
-                distance_fn=distance_fn,
-                sample_fn=sample_fn,
-                max_iterations=5000
-            )
+        
+        manipulability_max = planar_pruner.rrtc_loop(goal_coords[point], goal_orientations[point], 
+                                                            start_conf, goal_conf, 
+                                                            sample_fn, 
+                                                            distance_fn, 
+                                                            extend_fn, 
+                                                            collision_fn, 
+                                                            pos_tol=0.1,
+                                                            ori_tol=0.5,
+                                                            planar=True, 
+                                                            max_iter=250)
+        
+        print(f"Highest manipulability found: {np.round(manipulability_max, 5)}")
+        sys_manipulability[point] = manipulability_max
 
-            if path is not None:
-                final_joint_positions = path[-1]
-                planar_pruner.set_joint_positions(final_joint_positions)
-                final_end_effector_state = p.getLinkState(planar_pruner.robotId, planar_pruner.end_effector_index)
-                final_end_effector_pos = np.array(final_end_effector_state[0])
-                final_end_effector_orientation = np.array(final_end_effector_state[1])
+    print("Finished!\n")
 
-                within_tol, pos_diff, ori_diff = planar_pruner.check_pose_within_tolerance(final_end_effector_pos, final_end_effector_orientation, goal_coords[point], goal_orientations[point], pos_tolerance, ori_tolerance)
-                if within_tol:
-                    iteration = i
-                    num_feasible_path += 1
-
-                    # Calculate and print manipulability
-                    manipulability = planar_pruner.calculate_manipulability(final_joint_positions, final_end_effector_pos)
-                    if manipulability > manipulability_max:
-                        manipulability_max = manipulability
-                    # print(f'Manipulability at final position: {np.round(manipulability, 5)}')
-                    # print("")
-                    # break
-                else:
-                    path = None
-
-            sys_manipulability[point] = manipulability_max
-
-        if path is None:
-            # print("No path found within the specified tolerances!")
-            # print(f"Number of feasible paths found: {num_feasible_path}")
-            print(f"Highest manipulability found: {np.round(manipulability_max, 5)}")
-        # else:
-        #     # print(f"Path found within tolerances on iteration {iteration}! Executing path...")
-        #     # print(f"Number of feasible paths found: {num_feasible_path}")
-        #     print(f"Highest manipulability found: {manipulability_max}")
-        #     for config in path:
-        #         planar_pruner.set_joint_positions(config)
-        #         p.stepSimulation()
-        #         time.sleep(0.1)
-        #     print("Path execution complete. Robot should stay at the goal position.")
-            
-        #     final_position = path[-1]
-        #     while True:
-        #         planar_pruner.set_joint_positions(final_position)
-        #         p.stepSimulation()
-        #         time.sleep(0.1)
-
-    print(sys_manipulability)
+    # np.savetxt("./data/arc_manipulability_gripper.csv", np.hstack((goal_coords, goal_orientations, sys_manipulability)))
 
     p.disconnect()
 
