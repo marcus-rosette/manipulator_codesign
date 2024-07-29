@@ -35,17 +35,17 @@ class PlanarPruner:
         self.prune_point_2_pos = [start_x, start_y + 0.05, 0.55] 
         self.radius = 0.05 
 
-        self.leader_branchId = self.load_urdf("./urdf/leader_branch.urdf", [0, start_y, 1.6/2])
-        self.top_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, start_y, 1.5], [0, np.pi / 2, 0])
-        self.mid_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, start_y, 1], [0, np.pi / 2, 0])
-        self.bottom_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, start_y, 0.5], [0, np.pi / 2, 0])
-        self.collision_objects = [self.leader_branchId, self.top_branchId, self.mid_branchId, self.bottom_branchId, self.planeId]
+        # self.leader_branchId = self.load_urdf("./urdf/leader_branch.urdf", [0, start_y, 1.6/2])
+        # self.top_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, start_y, 1.5], [0, np.pi / 2, 0])
+        # self.mid_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, start_y, 1], [0, np.pi / 2, 0])
+        # self.bottom_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, start_y, 0.5], [0, np.pi / 2, 0])
+        # self.collision_objects = [self.leader_branchId, self.top_branchId, self.mid_branchId, self.bottom_branchId, self.planeId]
 
-        self.prune_point_0 = self.load_urdf("sphere2.urdf", self.prune_point_0_pos, radius=self.radius)
-        self.prune_point_1 = self.load_urdf("sphere2.urdf", self.prune_point_1_pos, radius=self.radius)
-        self.prune_point_2 = self.load_urdf("sphere2.urdf", self.prune_point_2_pos, radius=self.radius)
+        # self.prune_point_0 = self.load_urdf("sphere2.urdf", self.prune_point_0_pos, radius=self.radius)
+        # self.prune_point_1 = self.load_urdf("sphere2.urdf", self.prune_point_1_pos, radius=self.radius)
+        # self.prune_point_2 = self.load_urdf("sphere2.urdf", self.prune_point_2_pos, radius=self.radius)
 
-        self.robotId = p.loadURDF("./urdf/prrr_manipulator.urdf", [start_x, 0, 0], useFixedBase=True)
+        self.robotId = p.loadURDF("./urdf/rprr_manipulator.urdf", [start_x, 0, 0], useFixedBase=True)
         self.num_joints = p.getNumJoints(self.robotId)
 
         # Source the end-effector index
@@ -94,12 +94,6 @@ class PlanarPruner:
         zero_vec = [0.0] * len(joint_positions)
         jac_t, jac_r = p.calculateJacobian(self.robotId, self.end_effector_index, [0, 0, 0], joint_positions, zero_vec, zero_vec)
         jacobian = np.vstack((jac_t, jac_r))
-        # print(np.linalg.matrix_rank(jacobian))
-        
-        # # Check for singularity
-        # if np.linalg.matrix_rank(jacobian) < self.num_controllable_joints:
-        #     print("\nSingularity detected: Manipulability is zero.")
-        #     return 0.0
         
         if planar:
             jac_t = np.array(jac_t)[1:3]
@@ -128,7 +122,20 @@ def main():
     planar_pruner = PlanarPruner()
     goal_position = planar_pruner.prune_point_1_pos
     # goal_position = [0.5, 0.6, 0.6]
+
+    # [-0.1830127  0.1830127  0.6830127  0.6830127]
+    # [-0.14298942  0.14298942  0.69249839  0.69249839]
+    # [-0.1024823   0.1024823   0.69964089  0.69964089]
+    # [-0.06162842  0.06162842  0.70441603  0.70441603]
+    # [-0.020566    0.020566    0.70680764  0.70680764]
+    # [ 0.020566   -0.020566    0.70680764  0.70680764]
+    # [ 0.06162842 -0.06162842  0.70441603  0.70441603]
+    # [ 0.1024823  -0.1024823   0.69964089  0.69964089]
+    # [ 0.14298942 -0.14298942  0.69249839  0.69249839]
+    # [ 0.1830127 -0.1830127  0.6830127  0.6830127]
+
     goal_orientation = p.getQuaternionFromEuler([0, 1.57, 1.57])
+    # goal_orientation = [-0.06162842,  0.06162842,  0.70441603,  0.70441603]
     pos_tolerance = 0.1
     ori_tolerance = 0.5
 
@@ -139,10 +146,10 @@ def main():
     start_conf = planar_pruner.inverse_kinematics(start_end_effector_pos, start_end_effector_orientation)
     controllable_joints = list(range(planar_pruner.num_controllable_joints))
     distance_fn = get_distance_fn(planar_pruner.robotId, controllable_joints)
-    # sample_fn = planar_pruner.vector_field_sample_fn(goal_position, goal_orientation, alpha=0.7)
-    sample_fn = get_sample_fn(planar_pruner.robotId, controllable_joints)
+    sample_fn = planar_pruner.vector_field_sample_fn(goal_position, goal_orientation, alpha=0.7)
+    # sample_fn = get_sample_fn(planar_pruner.robotId, controllable_joints)
     extend_fn = get_extend_fn(planar_pruner.robotId, controllable_joints)
-    collision_fn = get_collision_fn(planar_pruner.robotId, controllable_joints, planar_pruner.collision_objects)
+    collision_fn = get_collision_fn(planar_pruner.robotId, controllable_joints, [])#planar_pruner.collision_objects)
 
     max_iterations = 5000
     num_feasible_path = 0
@@ -157,7 +164,7 @@ def main():
             collision_fn=collision_fn,
             distance_fn=distance_fn,
             sample_fn=sample_fn,
-            max_iterations=5000
+            max_iterations=1000
         )
 
         if path is not None:
@@ -174,6 +181,7 @@ def main():
             within_tol, pos_diff, ori_diff = planar_pruner.check_pose_within_tolerance(final_end_effector_pos, final_end_effector_orientation, goal_position, goal_orientation, pos_tolerance, ori_tolerance)
             if within_tol:
                 iteration = i
+                print(iteration)
                 num_feasible_path += 1
                 # print(f'\nTarget position: {goal_position}, Target orientation: {p.getEulerFromQuaternion(goal_orientation)}')
                 joint_states = [p.getJointState(planar_pruner.robotId, i)[0] for i in range(planar_pruner.num_joints)]

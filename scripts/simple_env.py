@@ -45,7 +45,31 @@ class PlanarPruner:
 
         return objectId
     
+    def prune_arc(self, prune_point, radius, allowance_angle, num_points, x_ori_default=0.0, z_ori_default=np.pi/2):
+        # Define theta as a descrete array
+        theta = np.linspace(-allowance_angle, allowance_angle, num_points)
+
+        # Set up arc length coordinate
+        x = np.full_like(theta, prune_point[0])  # x-coordinate remains constant
+        y = - radius * np.cos(theta) + prune_point[1] # multiply by a negative to mirror on other side of axis
+        z = radius * np.sin(theta) + prune_point[2] 
+
+        # Calculate orientation angles
+        arc_angles = np.arctan2(prune_point[2] - z, prune_point[1] - y)
+
+        arc_coords = np.vstack((x, y, z))
+
+        goal_coords = np.zeros((num_points, 3)) # 3 for x, y, z
+        goal_orientations = np.zeros((num_points, 4)) # 4 for quaternion
+        for i in range(num_points):
+            goal_coords[i] = [arc_coords[0][i], arc_coords[1][i], arc_coords[2][i]]
+            # goal_orientations[i] = p.getQuaternionFromEuler([x_ori_default, arc_angles[i] + np.pi + 1.57, z_ori_default])
+            goal_orientations[i] = p.getQuaternionFromEuler([x_ori_default, arc_angles[i] + np.pi/2, z_ori_default])
+
+        return goal_coords, goal_orientations
+    
     def calculate_manipulability(self, robot, ee_index, joint_positions, end_effector_pos, planar=True):
+        joint_positions = list(joint_positions)
         zero_vec = [0.0] * len(joint_positions)
         jac_t, jac_r = p.calculateJacobian(robot, ee_index, [0, 0, 0], joint_positions, zero_vec, zero_vec)
         jacobian = np.vstack((jac_t, jac_r))
@@ -77,18 +101,27 @@ def main():
     planar_pruner = PlanarPruner()
 
     # Load the manipulator
-    manipulatorId = planar_pruner.load_urdf("./urdf/prrr_manipulator.urdf", [0, 0, 0])
+    manipulatorId = planar_pruner.load_urdf("./urdf/rprr_manipulator.urdf", [0, 0, 0])
 
     # Set initial joint positions
     num_joints = p.getNumJoints(manipulatorId)
 
-    target_ee_pos = [0.5, 0.75, 0.85]
+    target_ee_pos = [0.5, 0.95, 1.1]
+    
+    points, oris = planar_pruner.prune_arc(target_ee_pos, 0.1, np.deg2rad(30), 10)
+
+    # target_ori = [-0.06162842,  0.06162842,  0.70441603,  0.70441603]
+    target_ori = p.getQuaternionFromEuler([0, 1.57, 1.57])
 
     # Set target joint position 
-    target_positions = [-0.04336070143909493, -0.13549289807162315, -0.38391860361870744, -1.026727607021244] 
+    # target_positions = [-0.5, 0.1, 0.5, 0.5] 
     # target_positions = [-1.57, 0.5, -1, 1, -1.5, 0]
 
-    # target_positions = np.array(p.calculateInverseKinematics(manipulatorId, num_joints - 1, target_ee_pos))
+    poi = 1
+
+    # target_positions = np.array(p.calculateInverseKinematics(manipulatorId, num_joints - 1, target_ee_pos, target_ori))
+    target_positions = np.array(p.calculateInverseKinematics(manipulatorId, num_joints - 1, points[poi], oris[poi]))
+    # print(target_positions)
     # print(target_positions)
 
     ee_index = p.getNumJoints(manipulatorId) - 1
@@ -107,7 +140,7 @@ def main():
             )
 
     # Wait until the manipulator reaches the target positions
-    tolerance = 0.02  # Position tolerance
+    tolerance = 0.45  # Position tolerance
     while True:
         joint_states = [p.getJointState(manipulatorId, i)[0] for i in range(num_joints)]
         if all(abs(joint_states[i] - target_positions[i]) < tolerance for i in range(len(target_positions))):
