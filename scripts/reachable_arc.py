@@ -45,7 +45,7 @@ class PlanarPruner:
         self.collision_objects = [self.leader_branchId, self.top_branchId, self.mid_branchId, self.bottom_branchId, self.planeId]
 
         self.prune_point_0 = self.load_urdf("sphere2.urdf", self.prune_point_0_pos, radius=self.radius)
-        self.prune_point_1 = self.load_urdf("sphere2.urdf", self.prune_point_1_pos, radius=self.radius)
+        # self.prune_point_1 = self.load_urdf("sphere2.urdf", self.prune_point_1_pos, radius=self.radius)
         self.prune_point_2 = self.load_urdf("sphere2.urdf", self.prune_point_2_pos, radius=self.radius)
 
         self.robotId = p.loadURDF(f"./urdf/{self.urdf_filename}.urdf", [start_x, 0, 0], useFixedBase=True)
@@ -65,15 +65,15 @@ class PlanarPruner:
 
     def prune_arc(self, prune_point, radius, allowance_angle, num_points, x_ori_default=0.0, z_ori_default=np.pi/2):
         # Define theta as a descrete array
-        theta = np.linspace(-allowance_angle, allowance_angle, num_points)
+        theta = np.linspace(3 * np.pi/2 - allowance_angle, 3 * np.pi/2 + allowance_angle, num_points)
 
         # Set up arc length coordinate
         x = np.full_like(theta, prune_point[0])  # x-coordinate remains constant
-        y = - radius * np.cos(theta) + prune_point[1] # multiply by a negative to mirror on other side of axis
-        z = radius * np.sin(theta) + prune_point[2] 
+        z = - radius * np.cos(theta) + prune_point[2] # multiply by a negative to mirror on other side of axis
+        y = radius * np.sin(theta) + prune_point[1] 
 
         # Calculate orientation angles
-        arc_angles = np.arctan2(prune_point[2] - z, prune_point[1] - y)
+        arc_angles = np.arctan2(prune_point[1] - y, prune_point[2] - z)
 
         arc_coords = np.vstack((x, y, z))
 
@@ -81,8 +81,7 @@ class PlanarPruner:
         goal_orientations = np.zeros((num_points, 4)) # 4 for quaternion
         for i in range(num_points):
             goal_coords[i] = [arc_coords[0][i], arc_coords[1][i], arc_coords[2][i]]
-            # goal_orientations[i] = p.getQuaternionFromEuler([x_ori_default, arc_angles[i] + np.pi/2, z_ori_default])
-            goal_orientations[i] = p.getQuaternionFromEuler([x_ori_default, arc_angles[i] + np.pi/2, z_ori_default])
+            goal_orientations[i] = p.getQuaternionFromEuler([x_ori_default, arc_angles[i], z_ori_default])
 
         return goal_coords, goal_orientations
         
@@ -124,7 +123,6 @@ class PlanarPruner:
         num_columns = jacobian.shape[1]
         colors = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (1, 0, 1), (0, 1, 1)]  # Different colors for each column
         for i in range(num_columns):
-
             vector = jacobian[:, i]
             start_point = end_effector_pos
             end_point = start_point + 0.3 * vector[:3]  # Scale the vector for better visualization
@@ -195,6 +193,42 @@ class PlanarPruner:
             
             return final_conf
         return sample
+    
+    def new_sample_fn(self, goal_position, goal_orientation, alpha=0.8):
+        def sample():
+            def generate_sample():
+                # Sample a random configuration within joint limits
+                random_conf = np.random.uniform([limit[0] for limit in self.joint_limits], 
+                                                [limit[1] for limit in self.joint_limits])
+                self.set_joint_positions(random_conf)
+                
+                # Get the current end-effector position
+                end_effector_position, _ = self.get_link_state(self.end_effector_index)
+                
+                # Calculate the vector towards the goal position
+                vector_to_goal = np.array(goal_position) - end_effector_position
+                guided_position = end_effector_position + vector_to_goal
+                
+                # Perform inverse kinematics to find the configuration for the guided position
+                guided_conf = np.array(p.calculateInverseKinematics(self.robotId, self.end_effector_index, guided_position))
+                
+                # Blend the random configuration and guided configuration using alpha
+                final_conf = (1 - alpha) * random_conf + alpha * guided_conf
+                
+                return final_conf
+            
+            while True:
+                final_conf = generate_sample()
+                self.set_joint_positions(final_conf)
+                end_effector_position, _ = self.get_link_state(self.end_effector_index)
+                
+                if end_effector_position[1] >= 0:  # Check if y >= 0 (in front of the xz plane)
+                    break  # Accept the sample if the end-effector is in front of the xz plane
+            
+            return final_conf
+
+        return sample
+
       
     def rrtc_loop(self, goal_coord, goal_ori, start_conf, goal_conf, sample_fn, distance_fn, extend_fn, collision_fn, pos_tol=0.1, ori_tol=0.5, planar=True, max_iter=1000):
         manipulability_max = 0
@@ -231,13 +265,13 @@ class PlanarPruner:
     
 
 def main():
-    planar_pruner = PlanarPruner(urdf_filename="rrr_manipulator")
+    planar_pruner = PlanarPruner(urdf_filename="rrpr_manipulator")
 
     simple_control = False
 
     prune_point = planar_pruner.prune_point_1_pos
 
-    num_points = 60
+    num_points = 20
 
     goal_coords, goal_orientations = planar_pruner.prune_arc(prune_point,
                                                               radius=0.1, 
@@ -247,12 +281,27 @@ def main():
                                                               z_ori_default=np.pi/2)
     
     if simple_control:
-        poi = 59
-        target_joint_positions = np.array(p.calculateInverseKinematics(planar_pruner.robotId, planar_pruner.num_joints - 1, goal_coords[poi], goal_orientations[poi]))
-        planar_pruner.simple_controller(target_joint_positions, position_tol=0.01)
+        # poi = int(num_points / 2)
+        poi = 10
+        target_joint_positions = np.array(p.calculateInverseKinematics(planar_pruner.robotId, planar_pruner.end_effector_index, goal_coords[poi], goal_orientations[poi]))
+
+        length = 0.1
+        for i in range(num_points):
+            start_point = goal_coords[i]
+            # print(start_point)
+
+            # Convert back to euler (SOMETIMES HAS ABIGUITY BETWEEN -PI TO PI)
+            angle = p.getEulerFromQuaternion(goal_orientations[i])
+            end_point = [start_point[0],
+                        start_point[1] + length * np.sin(angle[1]),
+                        start_point[2] + length * np.cos(angle[1])
+                        ]
+            # p.addUserDebugLine(start_point, end_point, (1, 0, 0), 2)
+
+        planar_pruner.simple_controller(target_joint_positions, position_tol=0.001)
 
     else:
-        data_filename = "rrpr_y_arc_manip"
+        data_filename = "rrrp_z_arc_manip"
 
         input(f"\nSaving data to: {data_filename}.csv. Press Enter if correct")
 
@@ -268,7 +317,7 @@ def main():
 
         for point in range(num_points):
             sample_fn = planar_pruner.vector_field_sample_fn(goal_coords[point], goal_orientations[point], alpha=0.6)
-            # sample_fn = planar_pruner.new_sample_fn(goal_coords[point], bias=0.1)
+            sample_fn = planar_pruner.new_sample_fn(goal_coords[point], goal_orientations[point], alpha=0.6)
             # sample_fn = get_sample_fn(planar_pruner.robotId, controllable_joints)
 
             goal_conf = planar_pruner.inverse_kinematics(goal_coords[point], goal_orientations[point])
@@ -282,14 +331,14 @@ def main():
                                                                 pos_tol=0.1,
                                                                 ori_tol=0.5,
                                                                 planar=True, 
-                                                                max_iter=1000)
+                                                                max_iter=500)
             
             print(f"Highest manipulability found: {np.round(manipulability_max, 5)}")
             sys_manipulability[point] = manipulability_max
 
         print("Finished!\n")
 
-        np.savetxt(f"./data/{data_filename}.csv", np.hstack((goal_coords, goal_orientations, sys_manipulability)))
+        # np.savetxt(f"./data/{data_filename}.csv", np.hstack((goal_coords, goal_orientations, sys_manipulability)))
 
         p.disconnect()
 
