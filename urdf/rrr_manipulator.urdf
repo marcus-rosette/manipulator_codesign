@@ -109,7 +109,7 @@
   <joint name="joint4" type="fixed">
     <parent link="link3"/>
     <child link="wrist"/>
-    <origin xyz="0 0 0.525" rpy="0 0 1.57"/>
+    <origin xyz="0 0 0.525" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <limit lower="-3.14" upper="3.14" effort="10" velocity="1"/>
   </joint>
@@ -119,7 +119,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.25 0.05 0.05"/>
+        <box size="0.05 0.25 0.05"/>
       </geometry>
       <material name="purple">
         <color rgba="0.5 0 0.5 1"/>
@@ -128,7 +128,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.25 0.05 0.05"/>
+        <box size="0.05 0.25 0.05"/>
       </geometry>
     </collision>
   </link>
@@ -137,7 +137,7 @@
   <joint name="joint5" type="fixed">
     <parent link="wrist"/>
     <child link="left_finger"/>
-    <origin xyz="-0.1 0 0.075" rpy="0 0 0"/>
+    <origin xyz="0 -0.1 0.075" rpy="0 0 0"/>
   </joint>
 
   <!-- Left Finger Link -->
@@ -163,7 +163,7 @@
   <joint name="joint6" type="fixed">
     <parent link="wrist"/>
     <child link="right_finger"/>
-    <origin xyz="0.1 0 0.075" rpy="0 0 0"/>
+    <origin xyz="0 0.1 0.075" rpy="0 0 0"/>
   </joint>
 
   <!-- Right Finger Link -->

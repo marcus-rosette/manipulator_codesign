@@ -44,9 +44,9 @@ class PlanarPruner:
         self.bottom_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, start_y, 0.5], [0, np.pi / 2, 0])
         self.collision_objects = [self.leader_branchId, self.top_branchId, self.mid_branchId, self.bottom_branchId, self.planeId]
 
-        self.prune_point_0 = self.load_urdf("sphere2.urdf", self.prune_point_0_pos, radius=self.radius)
-        # self.prune_point_1 = self.load_urdf("sphere2.urdf", self.prune_point_1_pos, radius=self.radius)
-        self.prune_point_2 = self.load_urdf("sphere2.urdf", self.prune_point_2_pos, radius=self.radius)
+        # self.prune_point_0 = self.load_urdf("sphere2.urdf", self.prune_point_0_pos, radius=self.radius)
+        self.prune_point_1 = self.load_urdf("sphere2.urdf", self.prune_point_1_pos, radius=self.radius)
+        # self.prune_point_2 = self.load_urdf("sphere2.urdf", self.prune_point_2_pos, radius=self.radius)
 
         self.robotId = p.loadURDF(f"./urdf/{self.urdf_filename}.urdf", [start_x, 0, 0], useFixedBase=True)
         self.num_joints = p.getNumJoints(self.robotId)
@@ -63,7 +63,7 @@ class PlanarPruner:
         # Extract joint limits from urdf
         self.joint_limits = [p.getJointInfo(self.robotId, i)[8:10] for i in range(self.num_controllable_joints)]
 
-    def prune_arc(self, prune_point, radius, allowance_angle, num_points, x_ori_default=0.0, z_ori_default=np.pi/2):
+    def prune_arc(self, prune_point, radius, allowance_angle, num_points, x_ori_default=0.0, z_ori_default=0):
         # Define theta as a descrete array
         theta = np.linspace(3 * np.pi/2 - allowance_angle, 3 * np.pi/2 + allowance_angle, num_points)
 
@@ -217,6 +217,7 @@ class PlanarPruner:
                 
                 return final_conf
             
+            iteration = 0
             while True:
                 final_conf = generate_sample()
                 self.set_joint_positions(final_conf)
@@ -224,7 +225,10 @@ class PlanarPruner:
                 
                 if end_effector_position[1] >= 0:  # Check if y >= 0 (in front of the xz plane)
                     break  # Accept the sample if the end-effector is in front of the xz plane
-            
+                
+                iteration += 1
+                if iteration > 200:
+                    break
             return final_conf
 
         return sample
@@ -265,24 +269,25 @@ class PlanarPruner:
     
 
 def main():
-    planar_pruner = PlanarPruner(urdf_filename="rrpr_manipulator")
+    planar_pruner = PlanarPruner(urdf_filename="prrr_manipulator")
 
     simple_control = False
+    save_data = True
 
     prune_point = planar_pruner.prune_point_1_pos
 
-    num_points = 20
+    num_points = 60
 
     goal_coords, goal_orientations = planar_pruner.prune_arc(prune_point,
                                                               radius=0.1, 
                                                               allowance_angle=np.deg2rad(30), 
                                                               num_points=num_points, 
                                                               x_ori_default=0, 
-                                                              z_ori_default=np.pi/2)
+                                                              z_ori_default=0)
     
     if simple_control:
         # poi = int(num_points / 2)
-        poi = 10
+        poi = 1
         target_joint_positions = np.array(p.calculateInverseKinematics(planar_pruner.robotId, planar_pruner.end_effector_index, goal_coords[poi], goal_orientations[poi]))
 
         length = 0.1
@@ -301,9 +306,10 @@ def main():
         planar_pruner.simple_controller(target_joint_positions, position_tol=0.001)
 
     else:
-        data_filename = "rrrp_z_arc_manip"
+        if save_data:
+            data_filename = "prrr_y_arc_manip_new"
 
-        input(f"\nSaving data to: {data_filename}.csv. Press Enter if correct")
+            input(f"\nSaving data to: {data_filename}.csv. Press Enter if correct")
 
         start_end_effector_pos, start_end_effector_orientation = planar_pruner.get_link_state(planar_pruner.end_effector_index)
 
@@ -316,7 +322,7 @@ def main():
         sys_manipulability = np.zeros((num_points, 1))
 
         for point in range(num_points):
-            sample_fn = planar_pruner.vector_field_sample_fn(goal_coords[point], goal_orientations[point], alpha=0.6)
+            # sample_fn = planar_pruner.vector_field_sample_fn(goal_coords[point], goal_orientations[point], alpha=0.6)
             sample_fn = planar_pruner.new_sample_fn(goal_coords[point], goal_orientations[point], alpha=0.6)
             # sample_fn = get_sample_fn(planar_pruner.robotId, controllable_joints)
 
@@ -331,14 +337,15 @@ def main():
                                                                 pos_tol=0.1,
                                                                 ori_tol=0.5,
                                                                 planar=True, 
-                                                                max_iter=500)
+                                                                max_iter=1000)
             
             print(f"Highest manipulability found: {np.round(manipulability_max, 5)}")
             sys_manipulability[point] = manipulability_max
 
         print("Finished!\n")
 
-        # np.savetxt(f"./data/{data_filename}.csv", np.hstack((goal_coords, goal_orientations, sys_manipulability)))
+        if save_data:
+            np.savetxt(f"./data/{data_filename}.csv", np.hstack((goal_coords, goal_orientations, sys_manipulability)))
 
         p.disconnect()
 
