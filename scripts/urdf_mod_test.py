@@ -114,7 +114,7 @@ def save_urdf(root, file_path):
 
 def create_planar_manipulator(filename, robot_name, shape_dims, prismatic_axis='0 1 0', link_shape='cylinder'):
     """
-    Creates a manipulator chain URDF.
+    Creates a planar manipulator chain URDF.
 
     :param filename: Name of the URDF file to be saved
     :param robot_name: Name of the robot within URDF
@@ -185,7 +185,84 @@ def create_planar_manipulator(filename, robot_name, shape_dims, prismatic_axis='
     # Save the URDF to a file
     save_urdf(robot, f'./urdf/{filename}.urdf')
 
+def create_manipulator(filename, robot_name, axes, shape_dims, link_shape='cylinder'):
+    """
+    Creates an n-DOF manipulator chain URDF.
 
-shape_dims = [[0, 0], [0.5, 0.05], [0, 0], [0.5, 0.05], [0.5, 0.05]]
+    :param filename: Name of the URDF file to be saved
+    :param robot_name: Name of the robot within URDF
+    :param axes: List of axes for each joint (e.g., ['0 0 1', '1 0 0', '0 1 0'])
+    :param shape_dims: List of dimensions for each link -> [(link_length (float), shape_radii (float))]
+    :param link_shape: Shape of link ('cylinder', 'box', etc.)
+    """
+    
+    # Initialize urdf
+    robot = ET.Element('robot', name=robot_name)
 
-create_planar_manipulator('auto_gen_manip', 'new_robot', shape_dims=shape_dims, prismatic_axis='0 1 0')
+    colors = {'blue': [0, 0, 1, 1], 'green': [0, 1, 0, 1], 'yellow': [1, 1, 0, 1], 'purple': [0.5, 0, 0.5, 1], 'pink': [1, 0, 1, 1], 'red': [1, 0, 0, 1]}
+
+    # Find the positions of all prismatic joints
+    prismatic_pos = [idx for idx, dims in enumerate(shape_dims) if dims == [0, 0]]
+
+    # Find the link indices on either side of prismatic joints
+    collision_idx = []
+    if all(axes[idx] == '0 0 1' for idx in prismatic_pos):
+        collision_idx = [num - 1 for num in prismatic_pos if num - 1 >= 0] + [num + 1 for num in prismatic_pos]
+
+    # Generate base link
+    base_link_name = 'base_link'
+    base_link_size = 0.25
+    base_link = create_link(name=base_link_name, type='box', shape_dim=[base_link_size, base_link_size, base_link_size], material='gray', color=[0.5, 0.5, 0.5, 1], collision=False)
+    robot.append(base_link)
+
+    parent_name = base_link_name
+    parent_length = base_link_size / 2  # Parent link length is halved for the first joint origin
+
+    # Turn on collision tag generation
+    collision = True
+
+    # Loop through each joint/link configuration
+    for i, (axis, (child_length, shape_radius)) in enumerate(zip(axes, shape_dims)):
+        color_name, color_code = list(colors.items())[i]
+
+        # Determine joint type and axis
+        if i in prismatic_pos:
+            joint_type = 'prismatic'
+            parent_length += 0.005 # Add a little buffer for collision issues
+        else:
+            joint_type = 'revolute'
+        
+        # Set collision tag to False if prismatic actuation in z-dir
+        if i in collision_idx:
+            collision = False
+
+        # Create joint and link
+        joint_name = f'joint{i}'
+        child_name = f'link{i}'
+        joint = create_joint(joint_name, joint_type=joint_type, parent=parent_name, child=child_name, axis=axis, origin=[0, 0, parent_length, 0, 0, 0])
+        link = create_link(child_name, type=link_shape, shape_dim=[child_length, shape_radius], origin=[0, 0, child_length / 2, 0, 0, 0], material=color_name, color=color_code, collision=collision)
+
+        # Attach joint and link to the robot
+        robot.append(joint)
+        robot.append(link)
+
+        # Update parent name and length for the next iteration
+        parent_name = child_name
+        parent_length = child_length
+
+    # Add a custom gripper if necessary
+    custom_gripper(robot, parent=parent_name, last_link_length=parent_length)
+
+    # Save the URDF to a file
+    save_urdf(robot, f'./urdf/{filename}.urdf')
+
+
+# # Example usage to generate a planar manipulator
+# shape_dims = [[0, 0], [0.5, 0.05], [0, 0], [0.5, 0.05], [0.5, 0.05]]
+# create_planar_manipulator('auto_gen_manip', 'new_robot', shape_dims=shape_dims, prismatic_axis='0 1 0')
+
+# Example usage to generate a manipulator with n-DOF and specified axes of rotation
+axes = ['0 0 1', '0 0 1', '1 0 0', '1 0 0', '0 1 0', '1 0 0']
+shape_dims = [[0.5, 0.05], [0, 0], [0.5, 0.05], [0.5, 0.05], [0.5, 0.05], [0.5, 0.05]]
+
+create_manipulator('auto_gen_manip', 'new_robot', axes=axes, shape_dims=shape_dims)
