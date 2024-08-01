@@ -63,7 +63,7 @@ class PlanarPruner:
         # Extract joint limits from urdf
         self.joint_limits = [p.getJointInfo(self.robotId, i)[8:10] for i in range(self.num_controllable_joints)]
 
-    def prune_arc(self, prune_point, radius, allowance_angle, num_points, x_ori_default=0.0, z_ori_default=0):
+    def prune_arc(self, prune_point, radius, allowance_angle, num_points, y_ori_default=0.0, z_ori_default=0):
         # Define theta as a descrete array
         theta = np.linspace(3 * np.pi/2 - allowance_angle, 3 * np.pi/2 + allowance_angle, num_points)
 
@@ -81,7 +81,7 @@ class PlanarPruner:
         goal_orientations = np.zeros((num_points, 4)) # 4 for quaternion
         for i in range(num_points):
             goal_coords[i] = [arc_coords[0][i], arc_coords[1][i], arc_coords[2][i]]
-            goal_orientations[i] = p.getQuaternionFromEuler([x_ori_default, arc_angles[i], z_ori_default])
+            goal_orientations[i] = p.getQuaternionFromEuler([-arc_angles[i], y_ori_default, z_ori_default])
 
         return goal_coords, goal_orientations
         
@@ -269,25 +269,32 @@ class PlanarPruner:
     
 
 def main():
-    planar_pruner = PlanarPruner(urdf_filename="prrr_manipulator")
+    planar_pruner = PlanarPruner(urdf_filename="auto_gen_manip")
 
     simple_control = False
-    save_data = True
+    save_data = False
 
     prune_point = planar_pruner.prune_point_1_pos
 
-    num_points = 60
+    num_points = 5
 
     goal_coords, goal_orientations = planar_pruner.prune_arc(prune_point,
                                                               radius=0.1, 
                                                               allowance_angle=np.deg2rad(30), 
                                                               num_points=num_points, 
-                                                              x_ori_default=0, 
+                                                              y_ori_default=0, 
                                                               z_ori_default=0)
     
     if simple_control:
         # poi = int(num_points / 2)
-        poi = 1
+        poi = 0
+        start_end_effector_pos, start_end_effector_orientation = planar_pruner.get_link_state(planar_pruner.end_effector_index)
+
+        # print(p.getEulerFromQuaternion(goal_orientations[poi]))
+        new_goal_pos = [0.5, 0.6, 0.85]
+        new_goal_ori = p.getQuaternionFromEuler([0.5, 0, 0])
+        # target_joint_positions = np.array(p.calculateInverseKinematics(planar_pruner.robotId, planar_pruner.end_effector_index, new_goal_pos, new_goal_ori))
+
         target_joint_positions = np.array(p.calculateInverseKinematics(planar_pruner.robotId, planar_pruner.end_effector_index, goal_coords[poi], goal_orientations[poi]))
 
         length = 0.1

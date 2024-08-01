@@ -75,6 +75,33 @@ def create_joint(name, parent, child, origin=[0, 0, 0, 0, 0, 0], joint_type='rev
     
     return joint
 
+def custom_gripper(robot, parent, last_link_length):
+    # Create a new joint and link for the wrist
+    wrist_joint = create_joint('wrist_joint', joint_type='fixed', parent=parent, child='wrist', origin=[0, 0, last_link_length + 0.025, 0, 0, 0])
+    wrist = create_link('wrist', type='box', shape_dim=[0.05, 0.25, 0.05], origin=[0, 0, 0, 0, 0, 0], material='purple', color=[0.5, 0, 0.5, 1])
+
+    # Create a new joint and link for the left finger
+    left_finger_joint = create_joint('left_finger_joint', joint_type='fixed', parent='wrist', child='left_finger', origin=[0, -0.1, 0.075, 0, 0, 0])
+    left_finger = create_link('left_finger', type='box', shape_dim=[0.05, 0.05, 0.15], origin=[0, 0, 0, 0, 0, 0], material='purple', color=[0.5, 0, 0.5, 1])
+
+    # Create a new joint and link for the right finger
+    right_finger_joint = create_joint('right_finger_joint', joint_type='fixed', parent='wrist', child='right_finger', origin=[0, 0.1, 0.075, 0, 0, 0])
+    right_finger = create_link('right_finger', type='box', shape_dim=[0.05, 0.05, 0.15], origin=[0, 0, 0, 0, 0, 0], material='purple', color=[0.5, 0, 0.5, 1])
+
+    # Create a new link for the center of the gripper
+    gripper_center_joint = create_joint('gripper_center_joint', joint_type='fixed', parent='wrist', child='gripper_center', origin=[0, 0, 0.15, 0, 0, 0])
+    gripper_center = create_link('gripper_center', type='sphere', shape_dim=[0.02], origin=[0, 0, 0, 0, 0, 0], material='red', color=[1, 0, 0, 1], collision=False)
+
+    # Attach gripper to end of robot
+    robot.append(wrist_joint)
+    robot.append(wrist)
+    robot.append(left_finger_joint)
+    robot.append(left_finger)
+    robot.append(right_finger_joint)
+    robot.append(right_finger)
+    robot.append(gripper_center)
+    robot.append(gripper_center_joint)
+
 def save_urdf(root, file_path):
     """
     Saves the URDF tree to a file.
@@ -85,61 +112,80 @@ def save_urdf(root, file_path):
     tree = ET.ElementTree(root)
     tree.write(file_path, xml_declaration=True, encoding='utf-8', method="xml")
 
-# Example usage
-robot = ET.Element('robot', name='example_robot')
+def create_planar_manipulator(filename, robot_name, shape_dims, prismatic_axis='0 1 0', link_shape='cylinder'):
+    """
+    Creates a manipulator chain URDF.
 
-# Create a base link
-base_box_dim = 0.25
-base_link = create_link('base_link', type='box', shape_dim=[base_box_dim, base_box_dim, base_box_dim], collision=False)
+    :param filename: Name of the URDF file to be saved
+    :param robot_name: Name of the robot within URDF
+    :param shape_dims: List of lists -> [(link_length (float), shape_radii (float))]
+    :param prismatic_axis: String -> Axis of translation for prismatic joint (default '0 1 0')
+    :param link_shape: Shape of link ('cylinder', 'box', etc.)
+    """
 
-# Create a new link and joint
-joint1 = create_joint('joint1', joint_type='revolute', parent='base_link', child='link1', axis='1 0 0', origin=[0, 0, base_box_dim/2, 0, 0, 0])
-link1_length = 0.5
-link1 = create_link('link1', type='cylinder', shape_dim=[0.5, 0.05], origin=[0, 0, link1_length/2, 0, 0, 0], material='blue', color=[0, 0, 1, 1])
+    # Initialize urdf
+    robot = ET.Element('robot', name=robot_name)
 
-# Create a new link and joint
-joint2 = create_joint('joint2', joint_type='revolute', parent='link1', child='link2', axis='1 0 0', origin=[0, 0, link1_length, 0, 0, 0])
-link2_length = 0.5
-link2 = create_link('link2', type='cylinder', shape_dim=[0.5, 0.05], origin=[0, 0, link2_length/2, 0, 0, 0], material='green', color=[0, 1, 0, 1])
+    colors = {'blue': [0, 0, 1, 1], 'green': [0, 1, 0, 1], 'yellow': [1, 1, 0, 1], 'pink': [1, 0, 1, 1], 'red': [1, 0, 0, 1]}
 
-# Create a new link and joint
-joint3 = create_joint('joint3', joint_type='revolute', parent='link2', child='link3', axis='1 0 0', origin=[0, 0, link2_length, 0, 0, 0])
-link3_length = 0.5
-link3 = create_link('link3', type='cylinder', shape_dim=[0.5, 0.05], origin=[0, 0, link3_length/2, 0, 0, 0], material='yellow', color=[1, 1, 0, 1])
+    # Find the positions of all prismatic joints
+    prismatic_pos = [idx for idx, dims in enumerate(shape_dims) if dims == [0, 0]]
 
-# Create a new joint and link for the wrist
-joint4 = create_joint('joint4', joint_type='fixed', parent='link3', child='wrist', origin=[0, 0, link3_length + 0.025, 0, 0, 0])
-wrist = create_link('wrist', type='box', shape_dim=[0.05, 0.25, 0.05], origin=[0, 0, 0, 0, 0, 0], material='purple', color=[0.5, 0, 0.5, 1])
+    # Find the link indices on either side of prismatic joints
+    collision_idx = []
+    if prismatic_axis == '0 0 1':
+        collision_idx = [num - 1 for num in prismatic_pos if num - 1 >= 0] + [num + 1 for num in prismatic_pos]
 
-# Create a new joint and link for the left finger
-joint5 = create_joint('joint5', joint_type='fixed', parent='wrist', child='left_finger', origin=[0, -0.1, 0.075, 0, 0, 0])
-left_finger = create_link('left_finger', type='box', shape_dim=[0.05, 0.05, 0.15], origin=[0, 0, 0, 0, 0, 0], material='purple', color=[0.5, 0, 0.5, 1])
+    # Generate base link
+    base_link_name = 'base_link'
+    base_link_size = 0.25
+    base_link = create_link(name=base_link_name, type='box', shape_dim=[base_link_size, base_link_size, base_link_size], material='gray', color=[0.5, 0.5, 0.5, 1], collision=False)
+    robot.append(base_link)
 
-# Create a new joint and link for the right finger
-joint6 = create_joint('joint6', joint_type='fixed', parent='wrist', child='right_finger', origin=[0, 0.1, 0.075, 0, 0, 0])
-right_finger = create_link('right_finger', type='box', shape_dim=[0.05, 0.05, 0.15], origin=[0, 0, 0, 0, 0, 0], material='purple', color=[0.5, 0, 0.5, 1])
+    parent_name = base_link_name
+    parent_length = base_link_size / 2  # Parent link length is halved for the first joint origin
 
-# Create a new link for the center of the gripper
-gripper_center = create_link('gripper_center', type='sphere', shape_dim=[0.02], origin=[0, 0, 0, 0, 0, 0], material='red', color=[1, 0, 0, 1], collision=False)
-joint7 = create_joint('joint7', joint_type='fixed', parent='wrist', child='gripper_center', origin=[0, 0, 0.15, 0, 0, 0])
+    # Turn on collision tag generation
+    collision = True
 
-# Construct robot
-robot.append(base_link)
-robot.append(joint1)
-robot.append(link1)
-robot.append(joint2)
-robot.append(link2)
-robot.append(joint3)
-robot.append(link3)
-robot.append(joint4)
-robot.append(wrist)
-robot.append(joint5)
-robot.append(left_finger)
-robot.append(joint6)
-robot.append(right_finger)
-robot.append(gripper_center)
-robot.append(joint7)
+    # Loop through each joint/link configuration
+    for i, (child_length, shape_radius) in enumerate(shape_dims):
+        color_name, color_code = list(colors.items())[i]
 
-# Save to a URDF file
-save_urdf(robot, './urdf/example_robot.urdf')
+        # Determine joint type and axis
+        if i in prismatic_pos:
+            joint_type = 'prismatic'
+            axis = prismatic_axis
+            parent_length += 0.005 # Add a little buffer for collision issues
+        else:
+            joint_type = 'revolute'
+            axis = '1 0 0'
+        
+        # Set collision tag to False if prismatic actuation in z-dir
+        if i in collision_idx:
+            collision = False
 
+        # Create joint and link
+        joint_name = f'joint{i}'
+        child_name = f'link{i}'
+        joint = create_joint(joint_name, joint_type=joint_type, parent=parent_name, child=child_name, axis=axis, origin=[0, 0, parent_length, 0, 0, 0])
+        link = create_link(child_name, type=link_shape, shape_dim=[child_length, shape_radius], origin=[0, 0, child_length / 2, 0, 0, 0], material=color_name, color=color_code, collision=collision)
+
+        # Attach joint and link to the robot
+        robot.append(joint)
+        robot.append(link)
+
+        # Update parent name and length for the next iteration
+        parent_name = child_name
+        parent_length = child_length
+
+    # Add a custom gripper if necessary
+    custom_gripper(robot, parent=parent_name, last_link_length=parent_length)
+
+    # Save the URDF to a file
+    save_urdf(robot, f'./urdf/{filename}.urdf')
+
+
+shape_dims = [[0, 0], [0.5, 0.05], [0, 0], [0.5, 0.05], [0.5, 0.05]]
+
+create_planar_manipulator('auto_gen_manip', 'new_robot', shape_dims=shape_dims, prismatic_axis='0 1 0')
