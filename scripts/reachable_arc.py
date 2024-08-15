@@ -2,6 +2,7 @@ import pybullet as p
 import pybullet_data
 import numpy as np
 import time
+from urdf_mod_test import create_planar_manipulator
 from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
 
 
@@ -32,7 +33,7 @@ class PlanarPruner:
         self.planeId = p.loadURDF("plane.urdf")
 
         start_x = 0.5
-        start_y = 1.0
+        start_y = 1
         self.prune_point_0_pos = [start_x, start_y, 1.55] 
         self.prune_point_1_pos = [start_x, start_y - 0.05, 1.1] 
         self.prune_point_2_pos = [start_x, start_y + 0.05, 0.55] 
@@ -52,20 +53,29 @@ class PlanarPruner:
         self.num_joints = p.getNumJoints(self.robotId)
 
         # Source the end-effector index
-        self.end_effector_index = self.num_joints - 1 # Assuming the end-effector is the last joint
+        print('end-effector index for ur5e is num_joints - 2 (instead of - 1)')
+        self.end_effector_index = self.num_joints - 2 # Assuming the end-effector is the last joint
 
         # Define controllable joint types
         controllable_joint_types = [p.JOINT_REVOLUTE, p.JOINT_PRISMATIC]
 
-        # Count controllable joints
-        self.num_controllable_joints = sum([1 for i in range(self.num_joints) if p.getJointInfo(self.robotId, i)[2] in controllable_joint_types])
+        # # Count controllable joints
+        # self.num_controllable_joints = sum([1 for i in range(self.num_joints) if p.getJointInfo(self.robotId, i)[2] in controllable_joint_types])
+
+        self.controllable_joint_idx = []
+        for joint in range(self.num_joints):
+            joint_info = p.getJointInfo(self.robotId, joint)
+            joint_type = joint_info[2]
+
+            if joint_type == p.JOINT_REVOLUTE or joint_type == p.JOINT_PRISMATIC: 
+                self.controllable_joint_idx.append(p.getJointInfo(self.robotId, joint)[0])
 
         # Extract joint limits from urdf
-        self.joint_limits = [p.getJointInfo(self.robotId, i)[8:10] for i in range(self.num_controllable_joints)]
+        self.joint_limits = [p.getJointInfo(self.robotId, i)[8:10] for i in self.controllable_joint_idx]
 
-    def prune_arc(self, prune_point, radius, allowance_angle, num_points, y_ori_default=0.0, z_ori_default=0):
+    def prune_arc(self, prune_point, radius, allowance_angle, num_arc_points, y_ori_default=0.0, z_ori_default=0):
         # Define theta as a descrete array
-        theta = np.linspace(3 * np.pi/2 - allowance_angle, 3 * np.pi/2 + allowance_angle, num_points)
+        theta = np.linspace(3 * np.pi/2 - allowance_angle, 3 * np.pi/2 + allowance_angle, num_arc_points)
 
         # Set up arc length coordinate
         x = np.full_like(theta, prune_point[0])  # x-coordinate remains constant
@@ -77,20 +87,20 @@ class PlanarPruner:
 
         arc_coords = np.vstack((x, y, z))
 
-        goal_coords = np.zeros((num_points, 3)) # 3 for x, y, z
-        goal_orientations = np.zeros((num_points, 4)) # 4 for quaternion
-        for i in range(num_points):
+        goal_coords = np.zeros((num_arc_points, 3)) # 3 for x, y, z
+        goal_orientations = np.zeros((num_arc_points, 4)) # 4 for quaternion
+        for i in range(num_arc_points):
             goal_coords[i] = [arc_coords[0][i], arc_coords[1][i], arc_coords[2][i]]
             goal_orientations[i] = p.getQuaternionFromEuler([-arc_angles[i], y_ori_default, z_ori_default])
 
         return goal_coords, goal_orientations
         
     def set_joint_positions(self, joint_positions):
-        for i in range(self.num_controllable_joints):
-            p.setJointMotorControl2(self.robotId, i, p.POSITION_CONTROL, joint_positions[i])
+        for i, joint_idx in enumerate(self.controllable_joint_idx):
+            p.setJointMotorControl2(self.robotId, joint_idx, p.POSITION_CONTROL, joint_positions[i])
     
     def get_joint_positions(self):
-        return [p.getJointState(self.robotId, i)[0] for i in range(self.num_controllable_joints)]
+        return [p.getJointState(self.robotId, i)[0] for i in self.controllable_joint_idx]
     
     def get_link_state(self, link_idx):
         link_state = p.getLinkState(self.robotId, link_idx)
@@ -144,31 +154,27 @@ class PlanarPruner:
 
         return np.sqrt(np.linalg.det(jacobian @ jacobian.T))
     
-    def simple_controller(self, target_joint_positions, position_tol=0.1):
+    def simple_controller(self, target_joint_positions, position_tol=0.1, planar=True):
         # Iterate over the joints and set their positions
-        for i in range(self.num_joints):
-            joint_info = p.getJointInfo(self.robotId, i)
-            joint_type = joint_info[2]
-
-            if joint_type == p.JOINT_REVOLUTE or joint_type == p.JOINT_PRISMATIC:
-                p.setJointMotorControl2(
-                    bodyIndex=self.robotId,
-                    jointIndex=i,
-                    controlMode=p.POSITION_CONTROL,
-                    targetPosition=target_joint_positions[i]
-                )
+        for i, joint_idx in enumerate(self.controllable_joint_idx):
+            p.setJointMotorControl2(
+                bodyIndex=self.robotId,
+                jointIndex=joint_idx,
+                controlMode=p.POSITION_CONTROL,
+                targetPosition=target_joint_positions[i]
+            )
 
         # Wait until the manipulator reaches the target positions
         while True:
-            joint_states = [p.getJointState(self.robotId, i)[0] for i in range(self.num_joints)]
+            joint_states = [p.getJointState(self.robotId, joint_idx)[0] for i, joint_idx in enumerate(self.controllable_joint_idx)]
             if all(abs(joint_states[i] - target_joint_positions[i]) < position_tol for i in range(len(target_joint_positions))):
                 break
             p.stepSimulation()
             time.sleep(0.01)
 
         # Plot manipulator manipulability after reaching target positions
-        manipulability = self.calculate_manipulability(list(target_joint_positions), planar=True, visualize_jacobian=True)
-        print(manipulability)
+        manipulability = self.calculate_manipulability(list(target_joint_positions), planar=planar, visualize_jacobian=True)
+        print(f'Manipulability: {manipulability}')
 
         # Run the simulation for visualization
         p.setRealTimeSimulation(1)
@@ -232,7 +238,6 @@ class PlanarPruner:
             return final_conf
 
         return sample
-
       
     def rrtc_loop(self, goal_coord, goal_ori, start_conf, goal_conf, sample_fn, distance_fn, extend_fn, collision_fn, pos_tol=0.1, ori_tol=0.5, planar=True, max_iter=1000):
         manipulability_max = 0
@@ -269,36 +274,53 @@ class PlanarPruner:
     
 
 def main():
-    planar_pruner = PlanarPruner(urdf_filename="auto_gen_manip")
+    # num_joints = 4
+    # cyl_shape = [0.5, 0.05]
+    # prismatic_shape = [0, 0]
+
+    # shape_dims = [prismatic_shape, cyl_shape, cyl_shape, cyl_shape]
+    # create_planar_manipulator('new', 'new_robot', shape_dims=shape_dims, prismatic_axis='0 1 0')
+
+
+    planar_pruner = PlanarPruner(urdf_filename="ur5e/ur5e_cutter_cart")
+    # planar_pruner = PlanarPruner(urdf_filename="auto_gen_manip")
 
     simple_control = False
     save_data = False
 
     prune_point = planar_pruner.prune_point_1_pos
 
-    num_points = 5
+    # prune_points = [planar_pruner.prune_point_0_pos, planar_pruner.prune_point_1_pos, planar_pruner.prune_point_2_pos]
+
+    num_arc_points = 30
+
+    # for prune_point in prune_points:
+    #     print(prune_point)
 
     goal_coords, goal_orientations = planar_pruner.prune_arc(prune_point,
                                                               radius=0.1, 
                                                               allowance_angle=np.deg2rad(30), 
-                                                              num_points=num_points, 
+                                                              num_arc_points=num_arc_points, 
                                                               y_ori_default=0, 
                                                               z_ori_default=0)
-    
+
     if simple_control:
-        # poi = int(num_points / 2)
+        # poi = int(num_arc_points / 2)
         poi = 0
         start_end_effector_pos, start_end_effector_orientation = planar_pruner.get_link_state(planar_pruner.end_effector_index)
 
+        print(p.getEulerFromQuaternion(start_end_effector_orientation))
+
         # print(p.getEulerFromQuaternion(goal_orientations[poi]))
         new_goal_pos = [0.5, 0.6, 0.85]
+        # goal_point = planar_pruner.load_urdf("sphere2.urdf", new_goal_pos, radius=0.05)
         new_goal_ori = p.getQuaternionFromEuler([0.5, 0, 0])
         # target_joint_positions = np.array(p.calculateInverseKinematics(planar_pruner.robotId, planar_pruner.end_effector_index, new_goal_pos, new_goal_ori))
 
         target_joint_positions = np.array(p.calculateInverseKinematics(planar_pruner.robotId, planar_pruner.end_effector_index, goal_coords[poi], goal_orientations[poi]))
 
         length = 0.1
-        for i in range(num_points):
+        for i in range(num_arc_points):
             start_point = goal_coords[i]
             # print(start_point)
 
@@ -310,7 +332,7 @@ def main():
                         ]
             # p.addUserDebugLine(start_point, end_point, (1, 0, 0), 2)
 
-        planar_pruner.simple_controller(target_joint_positions, position_tol=0.001)
+        planar_pruner.simple_controller(target_joint_positions, position_tol=0.1, planar=False)
 
     else:
         if save_data:
@@ -321,14 +343,14 @@ def main():
         start_end_effector_pos, start_end_effector_orientation = planar_pruner.get_link_state(planar_pruner.end_effector_index)
 
         start_conf = planar_pruner.inverse_kinematics(start_end_effector_pos, start_end_effector_orientation)
-        controllable_joints = list(range(planar_pruner.num_controllable_joints))
+        controllable_joints = planar_pruner.controllable_joint_idx
         distance_fn = get_distance_fn(planar_pruner.robotId, controllable_joints)
         extend_fn = get_extend_fn(planar_pruner.robotId, controllable_joints)
         collision_fn = get_collision_fn(planar_pruner.robotId, controllable_joints, planar_pruner.collision_objects)
 
-        sys_manipulability = np.zeros((num_points, 1))
+        sys_manipulability = np.zeros((num_arc_points, 1))
 
-        for point in range(num_points):
+        for point in range(num_arc_points):
             # sample_fn = planar_pruner.vector_field_sample_fn(goal_coords[point], goal_orientations[point], alpha=0.6)
             sample_fn = planar_pruner.new_sample_fn(goal_coords[point], goal_orientations[point], alpha=0.6)
             # sample_fn = get_sample_fn(planar_pruner.robotId, controllable_joints)
@@ -343,7 +365,7 @@ def main():
                                                                 collision_fn, 
                                                                 pos_tol=0.1,
                                                                 ori_tol=0.5,
-                                                                planar=True, 
+                                                                planar=False, 
                                                                 max_iter=1000)
             
             print(f"Highest manipulability found: {np.round(manipulability_max, 5)}")
