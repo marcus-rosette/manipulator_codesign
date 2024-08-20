@@ -2,7 +2,7 @@ import pybullet as p
 import pybullet_data
 import numpy as np
 import time
-from urdf_mod_test import create_planar_manipulator
+from align_ee_hemisphere import sample_hemisphere_suface_pts, end_effector_orientations
 from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
 
 
@@ -56,19 +56,11 @@ class PlanarPruner:
         print('end-effector index for ur5e is num_joints - 2 (instead of - 1)')
         self.end_effector_index = self.num_joints - 2 # Assuming the end-effector is the last joint
 
-        # Define controllable joint types
-        controllable_joint_types = [p.JOINT_REVOLUTE, p.JOINT_PRISMATIC]
-
-        # # Count controllable joints
-        # self.num_controllable_joints = sum([1 for i in range(self.num_joints) if p.getJointInfo(self.robotId, i)[2] in controllable_joint_types])
-
-        self.controllable_joint_idx = []
-        for joint in range(self.num_joints):
-            joint_info = p.getJointInfo(self.robotId, joint)
-            joint_type = joint_info[2]
-
-            if joint_type == p.JOINT_REVOLUTE or joint_type == p.JOINT_PRISMATIC: 
-                self.controllable_joint_idx.append(p.getJointInfo(self.robotId, joint)[0])
+        self.controllable_joint_idx = [
+            p.getJointInfo(self.robotId, joint)[0]
+            for joint in range(self.num_joints)
+            if p.getJointInfo(self.robotId, joint)[2] in {p.JOINT_REVOLUTE, p.JOINT_PRISMATIC}
+        ]
 
         # Extract joint limits from urdf
         self.joint_limits = [p.getJointInfo(self.robotId, i)[8:10] for i in self.controllable_joint_idx]
@@ -274,35 +266,36 @@ class PlanarPruner:
     
 
 def main():
-    # num_joints = 4
-    # cyl_shape = [0.5, 0.05]
-    # prismatic_shape = [0, 0]
-
-    # shape_dims = [prismatic_shape, cyl_shape, cyl_shape, cyl_shape]
-    # create_planar_manipulator('new', 'new_robot', shape_dims=shape_dims, prismatic_axis='0 1 0')
-
-
     planar_pruner = PlanarPruner(urdf_filename="ur5e/ur5e_cutter_cart")
-    # planar_pruner = PlanarPruner(urdf_filename="auto_gen_manip")
-
-    simple_control = False
-    save_data = False
-
     prune_point = planar_pruner.prune_point_1_pos
 
     # prune_points = [planar_pruner.prune_point_0_pos, planar_pruner.prune_point_1_pos, planar_pruner.prune_point_2_pos]
 
+    simple_control = False
+    save_data = False
+    planar = False
+
+    # Parameters for 2D arc manipulability search
     num_arc_points = 30
 
-    # for prune_point in prune_points:
-    #     print(prune_point)
+    # Parameters for 3D hemisphere manipulability search
+    num_hemisphere_points = [8, 8] # [num_theta, num_phi]
+    look_at_point_offset = 0.1
+    hemisphere_radius = 0.1
+    hemisphere_center = np.copy(prune_point)
+    hemisphere_center[1] -= look_at_point_offset    
 
-    goal_coords, goal_orientations = planar_pruner.prune_arc(prune_point,
-                                                              radius=0.1, 
-                                                              allowance_angle=np.deg2rad(30), 
-                                                              num_arc_points=num_arc_points, 
-                                                              y_ori_default=0, 
-                                                              z_ori_default=0)
+    if planar:
+        goal_coords, goal_orientations = planar_pruner.prune_arc(prune_point,
+                                                                radius=0.1, 
+                                                                allowance_angle=np.deg2rad(30), 
+                                                                num_arc_points=num_arc_points, 
+                                                                y_ori_default=0, 
+                                                                z_ori_default=0)
+    else:
+        goal_coords = sample_hemisphere_suface_pts(hemisphere_center, hemisphere_radius, num_hemisphere_points)
+        print(len(goal_coords))
+        goal_orientations = end_effector_orientations(prune_point, goal_coords)
 
     if simple_control:
         # poi = int(num_arc_points / 2)
@@ -366,7 +359,7 @@ def main():
                                                                 pos_tol=0.1,
                                                                 ori_tol=0.5,
                                                                 planar=False, 
-                                                                max_iter=1000)
+                                                                max_iter=200)
             
             print(f"Highest manipulability found: {np.round(manipulability_max, 5)}")
             sys_manipulability[point] = manipulability_max
