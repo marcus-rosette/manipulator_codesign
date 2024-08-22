@@ -66,46 +66,17 @@ def end_effector_orientations(point1, points2):
     
     return quaternions
 
-def ik_solver(robot, target_position, target_quaternion):
-    # Convert quaternion to rotation matrix
-    r = R.from_quat(target_quaternion)
-    rotation_matrix = r.as_matrix()
-
-    # Create the target pose
-    T = SE3(target_position) * SE3(rotation_matrix)
-
-    # Solve the inverse kinematics
-    q = robot.ikine_LM(T)  # Use the Levenberg-Marquardt method for IK
-    return q
-
-def orientation_error(robot, q, target_quaternion):
-    # Compute the end-effector pose for the given joint configuration
-    T_current = robot.fkine(q)
-    current_quaternion = R.from_matrix(T_current.R).as_quat()
-
-    # Compute the orientation error
-    r_target = R.from_quat(target_quaternion)
-    r_current = R.from_quat(current_quaternion)
-    error_rotation = r_target.inv() * r_current
-    error_angle = error_rotation.magnitude()  # Error angle in radians
-    
-    return error_angle
-
 def test():
-    # Connect to PyBullet and load the UR5e robot URDF
-    # Start the PyBullet simulations
+    # Start the PyBullet 
     p.connect(p.GUI)
     p.setAdditionalSearchPath(pybullet_data.getDataPath())  # Load default data
     
-    robot_id = p.loadURDF("./urdf/ur5e/ur5e_cutter_cart.urdf", useFixedBase=True, flags=p.URDF_USE_SELF_COLLISION)
-
-    # Define the UR5 robot using Robotics Toolbox
-    robot_rtb = rtb.models.DH.UR5()
+    robot_id = p.loadURDF("./urdf/ur5e/ur5e_cart.urdf", useFixedBase=True, flags=p.URDF_USE_SELF_COLLISION)
 
     num_joints = p.getNumJoints(robot_id)
 
-    # Get the end-effector link index for UR5e (assuming it's the 6th joint)
-    end_effector_index = num_joints - 2  # Change if your URDF differs
+    # Get the end-effector link index 
+    end_effector_index = num_joints - 3
 
     controllable_joint_idx = [
         p.getJointInfo(robot_id, joint)[0]
@@ -114,7 +85,7 @@ def test():
     ]
 
     # Target position and orientation for the end-effector
-    look_at_point = [0, 0.7, 1.1]    # Point where the end-effector should face
+    look_at_point = [0, 0.8, 1.2]    # Point where the end-effector should face
 
     # Visualize the look_at_point as a sphere
     look_at_sphere = p.loadURDF("sphere2.urdf", look_at_point, globalScaling=0.05, useFixedBase=True)
@@ -142,33 +113,24 @@ def test():
     poi_id = p.loadURDF("sphere2.urdf", target_position, globalScaling=0.05, useFixedBase=True)
     p.changeVisualShape(poi_id, -1, rgbaColor=[1, 0, 0, 1]) 
 
-    # # Use PyBullet's inverse kinematics to compute joint angles
-    # joint_angles = p.calculateInverseKinematics(
-    #     robot_id,
-    #     end_effector_index,
-    #     target_position,
-    #     target_orientation,
-    # )
+    # Use PyBullet's inverse kinematics to compute joint angles
+    joint_angles = p.calculateInverseKinematics(
+        robot_id,
+        end_effector_index,
+        target_position,
+        target_orientation
+    )
+
+    # Iterate over the joints and set their positions
+    for i, joint_idx in enumerate(controllable_joint_idx):
+        p.setJointMotorControl2(
+            bodyIndex=robot_id,
+            jointIndex=joint_idx,
+            controlMode=p.POSITION_CONTROL,
+            targetPosition=joint_angles[i]
+        )
 
     while True:
-        joint_angles = ik_solver(robot_rtb, target_position, target_orientation)
-        print(joint_angles)
-        # joint_angles = [-1.694, -1.805, -6.283, 0.1657, 1.569, -3.009]
-
-        # # Iterate over the joints and set their positions
-        # for i, joint_idx in enumerate(controllable_joint_idx):
-        #     p.setJointMotorControl2(
-        #         bodyIndex=robot_id,
-        #         jointIndex=joint_idx,
-        #         controlMode=p.POSITION_CONTROL,
-        #         targetPosition=joint_angles[i]
-        #     )
-
-        # for pt in hemisphere_pts:
-        #     p.loadURDF("sphere2.urdf", pt, globalScaling=0.05, useFixedBase=True)
-
-        # Run the simulation to observe the result
-        # while True:
         p.stepSimulation()
 
 
