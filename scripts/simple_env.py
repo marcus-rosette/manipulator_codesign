@@ -101,7 +101,7 @@ def main():
     planar_pruner = PlanarPruner()
 
     # Load the manipulator
-    manipulatorId = planar_pruner.load_urdf("./urdf/rprr_manipulator.urdf", [0, 0, 0])
+    manipulatorId = planar_pruner.load_urdf("./urdf/rrrp_manipulator.urdf", [0, 0, 0])
 
     # Set initial joint positions
     num_joints = p.getNumJoints(manipulatorId)
@@ -114,13 +114,13 @@ def main():
     target_ori = p.getQuaternionFromEuler([0, 1.57, 1.57])
 
     # Set target joint position 
-    # target_positions = [-0.5, 0.1, 0.5, 0.5] 
+    target_positions = [-0.5, 0.5, 0.5, -0.5] 
     # target_positions = [-1.57, 0.5, -1, 1, -1.5, 0]
 
     poi = 1
 
     # target_positions = np.array(p.calculateInverseKinematics(manipulatorId, num_joints - 1, target_ee_pos, target_ori))
-    target_positions = np.array(p.calculateInverseKinematics(manipulatorId, num_joints - 1, points[poi], oris[poi]))
+    # target_positions = np.array(p.calculateInverseKinematics(manipulatorId, num_joints - 1, points[poi], oris[poi]))
     # print(target_positions)
     # print(target_positions)
 

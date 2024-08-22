@@ -65,11 +65,16 @@ def plot_line_with_orientation(pt1, pt2, quaternion, rand_pt=False):
     plt.show()
 
 
-pt1 = [0.5, 0.7, 1.1]
-pt2 = [[1, 0.6, 1.08263518]] 
+pt1 = [0, 0.7, 1.1]
+pt2 = [[-0.01710101,  0.57038019,  1.00603074]] 
+
+# from pybullet
+# [-0.01710101  0.57038019  1.00603074]
+# [-0.4523549   0.05968011  0.          0.88983894]
 
 # Compute the quaternion for the line orientation
 quaternion = batch_line_orientations_quaternion(pt1, pt2)
+print(quaternion)
 
 # Plot the line based on the quaternion orientation
 plot_line_with_orientation(pt1, pt2, quaternion, rand_pt=False)

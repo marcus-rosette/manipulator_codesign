@@ -258,11 +258,10 @@ def create_manipulator(filename, robot_name, axes, shape_dims, link_shape='cylin
 
 
 # # Example usage to generate a planar manipulator
-# shape_dims = [[0, 0], [0.5, 0.05], [0, 0], [0.5, 0.05], [0.5, 0.05]]
-# create_planar_manipulator('auto_gen_manip', 'new_robot', shape_dims=shape_dims, prismatic_axis='0 1 0')
+shape_dims = [[0, 0], [0.5, 0.05], [0, 0], [0.5, 0.05], [0.5, 0.05]]
+create_planar_manipulator('auto_gen_manip', 'new_robot', shape_dims=shape_dims, prismatic_axis='0 1 0')
 
-# Example usage to generate a manipulator with n-DOF and specified axes of rotation
-axes = ['0 0 1', '0 0 1', '1 0 0', '1 0 0', '0 1 0', '1 0 0']
-shape_dims = [[0.5, 0.05], [0, 0], [0.5, 0.05], [0.5, 0.05], [0.5, 0.05], [0.5, 0.05]]
-
-create_manipulator('auto_gen_manip', 'new_robot', axes=axes, shape_dims=shape_dims)
+# # Example usage to generate a manipulator with n-DOF and specified axes of rotation
+# axes = ['0 0 1', '0 0 1', '1 0 0', '1 0 0', '0 1 0', '1 0 0']
+# shape_dims = [[0.5, 0.05], [0, 0], [0.5, 0.05], [0.5, 0.05], [0.5, 0.05], [0.5, 0.05]]
+# create_manipulator('auto_gen_manip', 'new_robot', axes=axes, shape_dims=shape_dims)
