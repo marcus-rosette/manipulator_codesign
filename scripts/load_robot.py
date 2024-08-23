@@ -50,11 +50,11 @@ class LoadRobot:
     def is_collision(self):
         return len(self.con.getContactPoints(self.robotId)) > 0
     
-    def inverse_kinematics(self, position, orientation=None):
+    def inverse_kinematics(self, position, orientation=None, pos_tol=1e-4):
         if orientation is not None:
-            joint_positions = self.con.calculateInverseKinematics(self.robotId, self.end_effector_index, position, orientation)
+            joint_positions = self.con.calculateInverseKinematics(self.robotId, self.end_effector_index, position, orientation, residualThreshold=pos_tol)
         else:
-            joint_positions = self.con.calculateInverseKinematics(self.robotId, self.end_effector_index, position)
+            joint_positions = self.con.calculateInverseKinematics(self.robotId, self.end_effector_index, position, residualThreshold=pos_tol)
         return joint_positions
     
     def quaternion_angle_difference(self, q1, q2):

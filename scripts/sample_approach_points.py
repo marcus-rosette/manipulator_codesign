@@ -30,7 +30,7 @@ class SamplePoints:
 
         return goal_coords, goal_orientations
     
-    def sample_hemisphere_suface_pts(self, origin, radius, num_points=[30, 30]):
+    def sample_hemisphere_suface_pts(self, look_at_point, look_at_point_offset, radius, num_points=[30, 30]):
         """
         Generates points on the surface of a hemisphere that lies on the xz-plane protruding along the y-axis 
         """
@@ -43,6 +43,10 @@ class SamplePoints:
         phi = np.linspace(0, np.pi, num_phi)  # Elevation angle (0 to pi/2 for hemisphere)
 
         theta, phi = np.meshgrid(theta, phi)
+
+        # Define the hemisphere origin
+        origin = np.copy(look_at_point)
+        origin[1] -= look_at_point_offset 
 
         # Convert spherical coordinates to Cartesian and scale by radius
         x = radius * np.sin(phi) * np.cos(theta) + origin[0]

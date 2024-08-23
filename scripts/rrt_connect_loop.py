@@ -148,9 +148,7 @@ def main():
     # Parameters for 3D hemisphere manipulability search
     num_hemisphere_points = [2, 2] # [num_theta, num_phi]
     look_at_point_offset = 0.1
-    hemisphere_radius = 0.1
-    hemisphere_center = np.copy(prune_point)
-    hemisphere_center[1] -= look_at_point_offset    
+    hemisphere_radius = 0.1  
 
     if planar:
         goal_coords, goal_orientations = pruner_env.point_sampler.prune_arc(prune_point,
@@ -162,7 +160,7 @@ def main():
         num_points = num_arc_points
         sys_manipulability = np.zeros((num_points, 1))
     else:
-        goal_coords = pruner_env.point_sampler.sample_hemisphere_suface_pts(hemisphere_center, hemisphere_radius, num_hemisphere_points)
+        goal_coords = pruner_env.point_sampler.sample_hemisphere_suface_pts(prune_point, look_at_point_offset, hemisphere_radius, num_hemisphere_points)
         goal_orientations = pruner_env.point_sampler.hemisphere_orientations(prune_point, goal_coords)
         num_points = len(goal_coords)
         sys_manipulability = np.zeros((num_points, 1))
