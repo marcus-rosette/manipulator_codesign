@@ -23,7 +23,7 @@ class LoadRobot:
         self.num_joints = self.con.getNumJoints(self.robotId)
 
         self.end_effector_index = self.num_joints - 3
-        print(f'Selected end-effector index info: {self.con.getJointInfo(self.robotId, self.end_effector_index)[:2]}')
+        print(f'\nSelected end-effector index info: {self.con.getJointInfo(self.robotId, self.end_effector_index)[:2]}')
 
         self.controllable_joint_idx = [
             self.con.getJointInfo(self.robotId, joint)[0]
@@ -37,7 +37,14 @@ class LoadRobot:
     def set_joint_positions(self, joint_positions):
         for i, joint_idx in enumerate(self.controllable_joint_idx):
             p.setJointMotorControl2(self.robotId, joint_idx, self.con.POSITION_CONTROL, joint_positions[i])
-    
+
+    def set_joint_path(self, joint_positions):
+        joint_positions_list = [tuple(p) for p in zip(*joint_positions)]
+
+        # Apply the interpolated positions
+        for positions in joint_positions_list:
+            self.con.setJointMotorControlArray(self.robotId, self.controllable_joint_idx, self.con.POSITION_CONTROL, targetPositions=positions)
+
     def get_joint_positions(self):
         return [self.con.getJointState(self.robotId, i)[0] for i in self.controllable_joint_idx]
     
@@ -57,6 +64,9 @@ class LoadRobot:
             joint_positions = self.con.calculateInverseKinematics(self.robotId, self.end_effector_index, position, residualThreshold=pos_tol)
         return joint_positions
     
+    def interpolate_joint_positions(self, start_positions, end_positions, steps):
+        return [np.linspace(start, end, steps) for start, end in zip(start_positions, end_positions)]
+
     def quaternion_angle_difference(self, q1, q2):
         # Compute the quaternion representing the relative rotation
         q1_conjugate = q1 * np.array([1, -1, -1, -1])  # Conjugate of q1

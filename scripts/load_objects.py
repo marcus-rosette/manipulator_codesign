@@ -33,22 +33,6 @@ class LoadObjects:
         self.bottom_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, self.start_y, 0.5], [0, np.pi / 2, 0])
         self.collision_objects = [self.leader_branchId, self.top_branchId, self.mid_branchId, self.bottom_branchId, self.planeId]
 
-        # self.prune_point_0 = self.load_urdf("sphere2.urdf", self.prune_point_0_pos, radius=self.radius)
+        self.prune_point_0 = self.load_urdf("sphere2.urdf", self.prune_point_0_pos, radius=self.radius)
         self.prune_point_1 = self.load_urdf("sphere2.urdf", self.prune_point_1_pos, radius=self.radius)
-        # self.prune_point_2 = self.load_urdf("sphere2.urdf", self.prune_point_2_pos, radius=self.radius)
-
-        # self.robotId = p.loadURDF(f"./urdf/{self.urdf_filename}.urdf", [start_x, 0, 0], useFixedBase=True)
-        # self.num_joints = p.getNumJoints(self.robotId)
-
-        # # Source the end-effector index
-        # print('end-effector index for ur5e is num_joints - 2 (instead of - 1)')
-        # self.end_effector_index = self.num_joints - 2 # Assuming the end-effector is the last joint
-
-        # self.controllable_joint_idx = [
-        #     p.getJointInfo(self.robotId, joint)[0]
-        #     for joint in range(self.num_joints)
-        #     if p.getJointInfo(self.robotId, joint)[2] in {p.JOINT_REVOLUTE, p.JOINT_PRISMATIC}
-        # ]
-
-        # # Extract joint limits from urdf
-        # self.joint_limits = [p.getJointInfo(self.robotId, i)[8:10] for i in self.controllable_joint_idx]
+        self.prune_point_2 = self.load_urdf("sphere2.urdf", self.prune_point_2_pos, radius=self.radius)

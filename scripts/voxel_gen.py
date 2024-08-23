@@ -62,9 +62,6 @@ def load_pc_and_downsample(file_path, z_threshold=0, neighbor_threshold=0.1, vox
     # Filter out any isolated neighboring points
     filtered_pcd = filter_isolated_points(downpcd, distance_threshold=neighbor_threshold)
 
-    print(f'Original number of points: {len(points)}')
-    print(f'Downsampled number of points: {len(filtered_pcd.points)}')
-
     # Create a voxel grid from the point cloud
     voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(filtered_pcd, voxel_size=voxel_size)
 
@@ -73,6 +70,9 @@ def load_pc_and_downsample(file_path, z_threshold=0, neighbor_threshold=0.1, vox
     
     # Extract voxel centers
     voxel_centers = [voxel_grid.get_voxel_center_coordinate(voxel.grid_index) for voxel in voxels]
+
+    print(f'Original number of points: {len(points)}')
+    print(f'Downsampled number of voxels: {len(voxel_centers)}')
 
     # Visualize the voxel grid (shows the voxel boundaries)
     if vis:
@@ -88,3 +88,5 @@ if __name__ == '__main__':
     voxel_size = 0.1 # meters
 
     voxel_centers = load_pc_and_downsample(file_path, z_threshold, neighbor_threshold, voxel_size, vis=True)
+
+    np.savetxt('./data/voxel_centers2.csv', voxel_centers)
