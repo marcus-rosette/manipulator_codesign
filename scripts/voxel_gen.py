@@ -1,5 +1,6 @@
 import numpy as np
 import open3d as o3d
+from scipy.spatial.transform import Rotation as R
 
 
 def filter_isolated_points(point_cloud, distance_threshold=0.1):
@@ -35,7 +36,7 @@ def filter_isolated_points(point_cloud, distance_threshold=0.1):
     
     return filtered_pcd
 
-def load_pc_and_downsample(file_path, z_threshold=0, neighbor_threshold=0.1, voxel_size=0.1, vis=True):
+def load_pc_and_downsample(file_path, z_threshold=0, neighbor_threshold=0.1, voxel_size=0.1):
     pcd = o3d.io.read_point_cloud(file_path)
 
     points = np.asarray(pcd.points) / 1000.0 # Convert from mm to m
@@ -62,31 +63,113 @@ def load_pc_and_downsample(file_path, z_threshold=0, neighbor_threshold=0.1, vox
     # Filter out any isolated neighboring points
     filtered_pcd = filter_isolated_points(downpcd, distance_threshold=neighbor_threshold)
 
-    # Create a voxel grid from the point cloud
-    voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(filtered_pcd, voxel_size=voxel_size)
+    return filtered_pcd
+
+def rectangular_prism_geometry(height, width, depth):
+    prism = o3d.geometry.TriangleMesh.create_box(width=width, height=height, depth=depth)
+    prism.translate(-prism.get_center())
+    return prism
+
+def parallelepiped_geometry(height, width, depth, theta):
+    # Define the rotation matrix around the x-axis
+    R_x = R.from_euler('x', theta).as_matrix()
+
+    # Define the 8 vertices of the parallelepiped, skewing in the y direction
+    vertices = np.array([
+        [0, 0, 0],                   # v0
+        [2*width, 0, 0],             # v1
+        [2*width, 2*height, 0],      # v2
+        [0, 2*height, 0],            # v3
+        [0, depth*np.tan(theta), depth],     # v4 (skewed by theta in y direction)
+        [2*width, depth*np.tan(theta), depth],   # v5 (skewed by theta in y direction)
+        [2*width, 2*height + depth*np.tan(theta), depth], # v6 (skewed by theta in y direction)
+        [0, 2*height + depth*np.tan(theta), depth]    # v7 (skewed by theta in y direction)
+    ])
+
+    # Apply the rotation to each vertex
+    rotated_vertices = np.dot(vertices, R_x.T)
+
+    # Define the triangles that make up the parallelepiped
+    triangles = np.array([
+        [0, 1, 2], [2, 3, 0],  # Bottom face
+        [4, 5, 6], [6, 7, 4],  # Top face
+        [0, 1, 5], [5, 4, 0],  # Front face
+        [1, 2, 6], [6, 5, 1],  # Right face
+        [2, 3, 7], [7, 6, 2],  # Back face
+        [3, 0, 4], [4, 7, 3]   # Left face
+    ])
+
+    # Create the mesh with rotated vertices
+    parallelepiped = o3d.geometry.TriangleMesh(
+        o3d.utility.Vector3dVector(rotated_vertices),
+        o3d.utility.Vector3iVector(triangles)
+    )
+
+    # Optionally, translate the parallelepiped to center it at the origin
+    parallelepiped.translate(-parallelepiped.get_center())
+
+    # Assign a uniform color to the entire parallelepiped
+    color = [0.0, 0.5, 1.0]  # Cyan color
+    parallelepiped.paint_uniform_color(color)
+
+    return parallelepiped
+
+def voxelize_shape(geometry, voxel_size, vis=False, pyb_tranform=True):
+    geometry_type = type(geometry)
+
+    # Voxelize the geometry with a specified voxel size
+    if geometry_type == o3d.geometry.TriangleMesh:    
+        voxel_grid = o3d.geometry.VoxelGrid.create_from_triangle_mesh(geometry, voxel_size=voxel_size)
+    if geometry_type == o3d.geometry.PointCloud:
+        voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(geometry, voxel_size=voxel_size)
 
     # Get the voxel data
     voxels = voxel_grid.get_voxels()
     
-    # Extract voxel centers
-    voxel_centers = [voxel_grid.get_voxel_center_coordinate(voxel.grid_index) for voxel in voxels]
+    # Extract voxel centers and their indices
+    voxel_centers, voxel_indices = zip(*[(voxel_grid.get_voxel_center_coordinate(voxel.grid_index), voxel.grid_index) for voxel in voxels])
 
-    print(f'Original number of points: {len(points)}')
-    print(f'Downsampled number of voxels: {len(voxel_centers)}')
-
-    # Visualize the voxel grid (shows the voxel boundaries)
     if vis:
-        o3d.visualization.draw_geometries([voxel_grid])
+        # Create a coordinate frame 
+        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
 
-    return voxel_centers
+        # Visualize the voxel grid and the coordinate frame together
+        o3d.visualization.draw_geometries([voxel_grid, coordinate_frame])
+
+    if pyb_tranform:
+        # Transform voxel data from open3d coordinate frame to pybullet coordinate frame
+        R_x = R.from_euler('x', np.pi/2).as_matrix()
+        rotated_voxel = np.dot(voxel_centers, R_x.T)
+        voxel_centers = rotated_voxel
+
+        y_trans = min(voxel_centers[:, 1])
+        z_trans = min(voxel_centers[:, 2])
+
+        translation = np.array([0, np.abs(y_trans), np.abs(z_trans)])
+        voxel_centers += translation
+
+    return voxel_centers, voxel_indices
 
 
 if __name__ == '__main__':
+    # Define parameters for the pointcloud
     file_path = "./point_clouds/pointcloud_2.ply"
     z_threshold = 1.5 # meters
     neighbor_threshold = 0.1 # meters
-    voxel_size = 0.1 # meters
+    voxel_size = 0.2 # meters
+    vis = False
 
-    voxel_centers = load_pc_and_downsample(file_path, z_threshold, neighbor_threshold, voxel_size, vis=True)
+    # Define the dimensions of the parallelepiped
+    width, height, depth = 0.5, 1.0, 0.25  # 2width x 2height x 0.5D
+    theta = np.deg2rad(20)
 
-    np.savetxt('./data/voxel_centers2.csv', voxel_centers)
+    rectangular_prism = rectangular_prism_geometry(height, width, depth)
+    parallelepiped = parallelepiped_geometry(height, width, depth, theta)
+    filtered_pcd = load_pc_and_downsample(file_path, z_threshold, neighbor_threshold, voxel_size)
+
+    voxel_centers, voxel_indices = voxelize_shape(parallelepiped, voxel_size=voxel_size, vis=vis)
+    print(len(voxel_centers))
+
+    np.savetxt('./data/voxel_data_parallelepiped.csv', np.hstack((voxel_centers, voxel_indices)))
+
+

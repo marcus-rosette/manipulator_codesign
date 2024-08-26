@@ -67,9 +67,11 @@ if __name__ == "__main__":
     look_at_point_offset = 0.1
     hemisphere_radius = 0.1
 
-    voxel_centers = np.loadtxt('./data/voxel_centers2.csv')
+    voxel_data = np.loadtxt('./data/voxel_data_parallelepiped.csv')
+    voxel_centers = voxel_data[:, :3]
+    voxel_indices = voxel_data[:, 3:]
 
-    save_data_filename = './data/voxel_ik_solutions2.csv'
-    path_filename = './data/voxel_paths2'
+    save_data_filename = './data/voxel_ik_solutions_parallelepiped.csv'
+    path_filename = './data/voxel_paths_parallelepiped'
     
     path_cache.find_high_manip_ik(voxel_centers, num_hemisphere_points, look_at_point_offset, hemisphere_radius, save_data_filename=save_data_filename, path_filename=path_filename)
