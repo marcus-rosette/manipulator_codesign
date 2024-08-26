@@ -1,6 +1,5 @@
 import numpy as np
-import pybullet as p
-import pybullet_data
+import time
 
 
 class LoadRobot:
@@ -36,14 +35,14 @@ class LoadRobot:
 
     def set_joint_positions(self, joint_positions):
         for i, joint_idx in enumerate(self.controllable_joint_idx):
-            p.setJointMotorControl2(self.robotId, joint_idx, self.con.POSITION_CONTROL, joint_positions[i])
+            self.con.setJointMotorControl2(self.robotId, joint_idx, self.con.POSITION_CONTROL, joint_positions[i])
 
-    def set_joint_path(self, joint_positions):
-        joint_positions_list = [tuple(p) for p in zip(*joint_positions)]
-
-        # Apply the interpolated positions
-        for positions in joint_positions_list:
-            self.con.setJointMotorControlArray(self.robotId, self.controllable_joint_idx, self.con.POSITION_CONTROL, targetPositions=positions)
+    def set_joint_path(self, joint_path):
+        # Vizualize the interpolated positions
+        for config in joint_path:
+            self.con.setJointMotorControlArray(self.robotId, self.controllable_joint_idx, self.con.POSITION_CONTROL, targetPositions=config)
+            self.con.stepSimulation()
+            time.sleep(1/100)
 
     def get_joint_positions(self):
         return [self.con.getJointState(self.robotId, i)[0] for i in self.controllable_joint_idx]
@@ -64,8 +63,9 @@ class LoadRobot:
             joint_positions = self.con.calculateInverseKinematics(self.robotId, self.end_effector_index, position, residualThreshold=pos_tol)
         return joint_positions
     
-    def interpolate_joint_positions(self, start_positions, end_positions, steps):
-        return [np.linspace(start, end, steps) for start, end in zip(start_positions, end_positions)]
+    def linear_interp_path(self, end_positions, start_positions=[0.0]*6, steps=100):
+        interpolated_joint_angles = [np.linspace(start, end, steps) for start, end in zip(start_positions, end_positions)]
+        return [tuple(p) for p in zip(*interpolated_joint_angles)]
 
     def quaternion_angle_difference(self, q1, q2):
         # Compute the quaternion representing the relative rotation

@@ -8,7 +8,7 @@ class PybUtils:
     def __init__(self, env, renders: bool = False) -> None:
         self.renders = renders
         self.env = env
-        self.step_time = 1 / 4
+        self.step_time = 1 / 240
 
         self.con = None
 

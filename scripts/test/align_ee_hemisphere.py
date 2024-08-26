@@ -2,7 +2,6 @@ import pybullet as p
 import pybullet_data
 import numpy as np
 import time
-from scipy.spatial.transform import Rotation as R
 import sys
 import os
 
@@ -43,6 +42,8 @@ def test():
 
     # Target position and orientation for the end-effector
     look_at_point = [0, 0.8, 1.2]    # Point where the end-effector should face
+    look_at_point_offset = 0.1
+    num_points = [10, 10]
 
     point_sampler = SamplePoints(p, planar=False)
 
@@ -50,12 +51,7 @@ def test():
     look_at_sphere = p.loadURDF("sphere2.urdf", look_at_point, globalScaling=0.05, useFixedBase=True)
     p.changeVisualShape(look_at_sphere, -1, rgbaColor=[0, 1, 0, 1]) 
 
-    look_at_point_offset = 0.1
-    hemisphere_center = np.copy(look_at_point)
-    hemisphere_center[1] -= look_at_point_offset
-    num_points = [10, 10]
-
-    hemisphere_pts = point_sampler.sample_hemisphere_suface_pts(hemisphere_center, 0.1, num_points)
+    hemisphere_pts = point_sampler.sample_hemisphere_suface_pts(look_at_point, look_at_point_offset, 0.1, num_points)
     hemisphere_oris = point_sampler.hemisphere_orientations(look_at_point, hemisphere_pts)
 
     # Iterate through position and orientation pairs

@@ -1,6 +1,4 @@
 import numpy as np
-import pybullet as p
-import pybullet_data
 
 
 class LoadObjects:
@@ -14,7 +12,7 @@ class LoadObjects:
             objectId = self.con.loadURDF(urdf_name, start_pos, orientation, useFixedBase=fix_base)
         else:
             objectId = self.con.loadURDF(urdf_name, start_pos, globalScaling=radius, useFixedBase=fix_base)
-            p.changeVisualShape(objectId, -1, rgbaColor=[0, 1, 0, 1]) 
+            self.con.changeVisualShape(objectId, -1, rgbaColor=[0, 1, 0, 1]) 
         return objectId
 
     def load_objects(self):
