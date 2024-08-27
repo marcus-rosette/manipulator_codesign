@@ -6,6 +6,12 @@ from pybullet_utils import bullet_client as bc
 
 class PybUtils:
     def __init__(self, env, renders: bool = False) -> None:
+        """ Base class for the PyBullet Client
+
+        Args:
+            env (class): initialized class that starts this base class
+            renders (bool, optional): visualize the env with the PyBullet GUI. Defaults to False.
+        """
         self.renders = renders
         self.env = env
         self.step_time = 1 / 240

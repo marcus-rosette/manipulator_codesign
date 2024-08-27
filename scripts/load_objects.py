@@ -3,10 +3,27 @@ import numpy as np
 
 class LoadObjects:
     def __init__(self, con) -> None:
+        """ Object loader class
+
+        Args:
+            con (class): PyBullet client - an instance of the started env
+        """
         self.con = con
         self.load_objects()
 
     def load_urdf(self, urdf_name, start_pos=[0, 0, 0], start_orientation=[0, 0, 0], fix_base=True, radius=None):
+        """ Load a urdf using PyBullets urdf loader
+
+        Args:
+            urdf_name (str): filename/path to urdf file
+            start_pos (list, optional): starting origin. Defaults to [0, 0, 0].
+            start_orientation (list, optional): starting orientation. Defaults to [0, 0, 0].
+            fix_base (bool, optional): fixed or floating. Defaults to True.
+            radius (float, optional): radius of loaded object. Defaults to None.
+
+        Returns:
+            int: PyBullet object ID
+        """
         orientation = self.con.getQuaternionFromEuler(start_orientation)
         if radius is None:
             objectId = self.con.loadURDF(urdf_name, start_pos, orientation, useFixedBase=fix_base)
@@ -16,6 +33,8 @@ class LoadObjects:
         return objectId
 
     def load_objects(self):
+        """ Load objects into the started PyBullet simulation
+        """
         self.planeId = self.load_urdf("plane.urdf")
 
         self.start_x = 0.5

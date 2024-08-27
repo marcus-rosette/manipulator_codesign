@@ -2,6 +2,16 @@ import numpy as np
 
 
 def path_to_closest_voxel(target_point, voxel_centers, paths):
+    """ Find the path to a voxel that the target point is closest to 
+
+    Args:
+        target_point (float list): target 3D coordinate
+        voxel_centers (float list): list of voxel center coordinates to search through
+        paths (float list): list of joint trajectories associated with the voxel centers
+
+    Returns:
+        path: the path to the voxel the target point is closes to
+    """
     # Calculate distances
     distances = np.linalg.norm(voxel_centers - target_point, axis=1)
     

@@ -2,19 +2,36 @@ import numpy as np
 from pyb_utils import PybUtils
 from load_objects import LoadObjects
 from load_robot import LoadRobot
-from sample_approach_points import SamplePoints
+from sample_approach_points import sample_hemisphere_suface_pts, hemisphere_orientations
 
 
 class PathCache:
-    def __init__(self, robot_urdf_path: str, planar: bool, renders=True):
+    def __init__(self, robot_urdf_path: str, renders=True):
+        """ Generate a cache of paths to high scored manipulability configurations
+
+        Args:
+            robot_urdf_path (str): filename/path to urdf file of robot
+            renders (bool, optional): visualize the robot in the PyBullet GUI. Defaults to True.
+        """
         self.pyb = PybUtils(self, renders=renders)
         self.object_loader = LoadObjects(self.pyb.con)
         self.robot = LoadRobot(self.pyb.con, robot_urdf_path, [0, -0.5, 0], self.pyb.con.getQuaternionFromEuler([0, 0, 0]))
-        self.point_sampler = SamplePoints(self.pyb.con, planar)
 
     def find_high_manip_ik(self, points, num_hemisphere_points, look_at_point_offset, hemisphere_radius, num_configs_in_path=100, save_data_filename=None, path_filename=None):
+        """ Find the inverse kinematic solutions that result in the highest manipulability
+
+        Args:
+            points (float list): target end-effector points
+            num_hemisphere_points (int list): number of points along each dimension [num_theta, num_pi]
+            look_at_point_offset (float): distance to offset the sampled hemisphere from the target point
+            hemisphere_radius (float): radius of generated hemisphere
+            num_configs_in_path (int, optional): number of joint configurations within path. Defaults to 100.
+            save_data_filename (str, optional): file name/path for saving inverse kinematics data. Defaults to None.
+            path_filename (str, optional): file name/path for saving resultant paths. Defaults to None.
+        """
         num_points = len(points)
 
+        # Initialize arrays for saving data
         best_iks = np.zeros((num_points, len(self.robot.controllable_joint_idx)))
         best_ee_positions = np.zeros((num_points, 3))
         best_orienations = np.zeros((num_points, 4))
@@ -22,8 +39,9 @@ class PathCache:
         best_paths = np.zeros((num_configs_in_path, len(self.robot.controllable_joint_idx), num_points))
 
         for i, pt in enumerate(points):
-            hemisphere_pts = self.point_sampler.sample_hemisphere_suface_pts(pt, look_at_point_offset, hemisphere_radius, num_hemisphere_points)
-            hemisphere_oris = self.point_sampler.hemisphere_orientations(pt, hemisphere_pts)
+            # Sample target points
+            hemisphere_pts = sample_hemisphere_suface_pts(pt, look_at_point_offset, hemisphere_radius, num_hemisphere_points)
+            hemisphere_oris = hemisphere_orientations(pt, hemisphere_pts)
 
             best_ik = None
             best_ee_pos = None
@@ -31,6 +49,7 @@ class PathCache:
             best_manipulability = 0
             best_path = None
 
+            # Get IK solution for each target point on hemisphere and save the one with the highest manipulability 
             for target_position, target_orientation in zip(hemisphere_pts, hemisphere_oris):
                 joint_angles = self.robot.inverse_kinematics(target_position, target_orientation)
 
@@ -41,6 +60,8 @@ class PathCache:
                     best_ee_pos = target_position
                     best_orienation = target_orientation
                     best_manipulability = manipulability
+
+                    # Interpolate a path from the starting configuration to the best IK solution
                     best_path = self.robot.linear_interp_path(joint_angles, steps=num_configs_in_path)
 
             best_iks[i, :] = best_ik

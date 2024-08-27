@@ -9,7 +9,7 @@ import os
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.abspath(os.path.join(current_dir, os.pardir))
 sys.path.append(parent_dir)
-from sample_approach_points import SamplePoints
+from sample_approach_points import prune_arc, sample_hemisphere_suface_pts, hemisphere_orientations
 
 
 def test():
@@ -45,14 +45,12 @@ def test():
     look_at_point_offset = 0.1
     num_points = [10, 10]
 
-    point_sampler = SamplePoints(p, planar=False)
-
     # Visualize the look_at_point as a sphere
     look_at_sphere = p.loadURDF("sphere2.urdf", look_at_point, globalScaling=0.05, useFixedBase=True)
     p.changeVisualShape(look_at_sphere, -1, rgbaColor=[0, 1, 0, 1]) 
 
-    hemisphere_pts = point_sampler.sample_hemisphere_suface_pts(look_at_point, look_at_point_offset, 0.1, num_points)
-    hemisphere_oris = point_sampler.hemisphere_orientations(look_at_point, hemisphere_pts)
+    hemisphere_pts = sample_hemisphere_suface_pts(look_at_point, look_at_point_offset, 0.1, num_points)
+    hemisphere_oris = hemisphere_orientations(look_at_point, hemisphere_pts)
 
     # Iterate through position and orientation pairs
     for target_position, target_orientation in zip(hemisphere_pts, hemisphere_oris):

@@ -4,6 +4,15 @@ from scipy.spatial.transform import Rotation as R
 
 
 def filter_isolated_points(point_cloud, distance_threshold=0.1):
+    """ Filter isolated points from cloud that are outside a threshold
+
+    Args:
+        point_cloud (open3d point cloud): point cloud data
+        distance_threshold (float, optional): distance for points to be included in final point cloud. Defaults to 0.1.
+
+    Returns:
+        open3d point cloud: filtered point cloud 
+    """
     # Convert point cloud to a numpy array for easy manipulation
     points = np.asarray(point_cloud.points)
     
@@ -37,6 +46,17 @@ def filter_isolated_points(point_cloud, distance_threshold=0.1):
     return filtered_pcd
 
 def load_pc_and_downsample(file_path, z_threshold=0, neighbor_threshold=0.1, voxel_size=0.1):
+    """ Load point cloud and filter/downsample
+
+    Args:
+        file_path (str): file name/path to point cloud data
+        z_threshold (int, optional): distance to include points in the z (front) direction. Defaults to 0.
+        neighbor_threshold (float, optional): distance for points to be included in final point cloud. Defaults to 0.1.
+        voxel_size (float, optional): size of voxel. Defaults to 0.1.
+
+    Returns:
+        open3d point cloud: filtered point cloud
+    """
     pcd = o3d.io.read_point_cloud(file_path)
 
     points = np.asarray(pcd.points) / 1000.0 # Convert from mm to m
@@ -66,11 +86,32 @@ def load_pc_and_downsample(file_path, z_threshold=0, neighbor_threshold=0.1, vox
     return filtered_pcd
 
 def rectangular_prism_geometry(height, width, depth):
+    """ Generate the geometry of a rectangular prism
+
+    Args:
+        height (float): height (y-axis)
+        width (float): width (x-axis)
+        depth (float): depth (z-axis)
+
+    Returns:
+        opne3d geometry: mesh of rectangular prism
+    """
     prism = o3d.geometry.TriangleMesh.create_box(width=width, height=height, depth=depth)
     prism.translate(-prism.get_center())
     return prism
 
 def parallelepiped_geometry(height, width, depth, theta):
+    """ Generate the geometry of a parallelepiped
+
+    Args:
+        height (float): height (y-axis)
+        width (float): width (x-axis)
+        depth (float): depth (z-axis)
+        theta (float): skew angle of prism (yz-plane)
+
+    Returns:
+        opne3d geometry: mesh of parallelepiped
+    """
     # Define the rotation matrix around the x-axis
     R_x = R.from_euler('x', theta).as_matrix()
 
@@ -115,6 +156,17 @@ def parallelepiped_geometry(height, width, depth, theta):
     return parallelepiped
 
 def voxelize_shape(geometry, voxel_size, vis=False, pyb_tranform=True):
+    """ Voxelize a mesh and extract the voxel center coordinates
+
+    Args:
+        geometry (open3d geometry): geometry to voxelize
+        voxel_size (float): voxel size
+        vis (bool, optional): visualize the voxelized geometry. Defaults to False.
+        pyb_tranform (bool, optional): transform from open3d coordinates to PyBullet coordinates. Defaults to True.
+
+    Returns:
+        float lists: voxel center coordinates and their indices
+    """
     geometry_type = type(geometry)
 
     # Voxelize the geometry with a specified voxel size

@@ -4,6 +4,14 @@ import time
 
 class LoadRobot:
     def __init__(self, con, robot_urdf_path: str, start_pos, start_orientation) -> None:
+        """ Robot loader class
+
+        Args:
+            con (class): PyBullet client - an instance of the started env
+            robot_urdf_path (str): filename/path to urdf file of robot
+            start_pos (float list):  starting origin
+            start_orientation (float list): starting orientation as a quaternion
+        """
         assert isinstance(robot_urdf_path, str)
 
         self.con = con
@@ -15,6 +23,8 @@ class LoadRobot:
         self.setup_robot()
 
     def setup_robot(self):
+        """ Initialize robot
+        """
         assert self.robotId is None
         flags = self.con.URDF_USE_SELF_COLLISION
 
@@ -64,6 +74,16 @@ class LoadRobot:
         return joint_positions
     
     def linear_interp_path(self, end_positions, start_positions=[0.0]*6, steps=100):
+        """ Interpolate linear joint positions between a start and end configuration
+
+        Args:
+            end_positions (float list): end joint configuration
+            start_positions (float list, optional): start joint configuration. Defaults to [0.0]*6.
+            steps (int, optional): number of interpolated positions. Defaults to 100.
+
+        Returns:
+            list: interpolated path
+        """
         interpolated_joint_angles = [np.linspace(start, end, steps) for start, end in zip(start_positions, end_positions)]
         return [tuple(p) for p in zip(*interpolated_joint_angles)]
 
