@@ -24,6 +24,7 @@ class PybUtils:
         # New class for pybullet
         if self.renders:
             self.con = bc.BulletClient(connection_mode=p.GUI)
+            self.con.configureDebugVisualizer(self.con.COV_ENABLE_GUI, 0)
         else:
             self.con = bc.BulletClient(connection_mode=p.DIRECT)
 

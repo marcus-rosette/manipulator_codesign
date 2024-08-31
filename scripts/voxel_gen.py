@@ -197,7 +197,8 @@ def voxelize_shape(geometry, voxel_size, vis=False, pyb_tranform=True):
         y_trans = min(voxel_centers[:, 1])
         z_trans = min(voxel_centers[:, 2])
 
-        translation = np.array([0, np.abs(y_trans), np.abs(z_trans)])
+        # translation = np.array([0, np.abs(y_trans), np.abs(z_trans)])
+        translation = np.array([0, 0, np.abs(z_trans)])
         voxel_centers += translation
 
     return voxel_centers, voxel_indices
@@ -208,7 +209,7 @@ if __name__ == '__main__':
     file_path = "./point_clouds/pointcloud_2.ply"
     z_threshold = 1.5 # meters
     neighbor_threshold = 0.1 # meters
-    voxel_size = 0.2 # meters
+    voxel_size = 0.1 # meters
     vis = False
 
     # Define the dimensions of the parallelepiped

@@ -105,7 +105,7 @@
   <joint name="shoulder_pan_joint" type="revolute">
     <parent link="base_link" />
     <child link="shoulder_link" />
-    <origin rpy="0 0 0.785" xyz="0 0 0.162509611124" />
+    <origin rpy="0 0 3.14159265774" xyz="0 0 0.162509611124" />
     <axis xyz="0 0 1" />
     <limit effort="150.0" lower="-6.28318530718" upper="6.28318530718" velocity="3.14" />
     <dynamics damping="0.0" friction="0.0" />
@@ -135,7 +135,7 @@
   <joint name="shoulder_lift_joint" type="revolute">
     <parent link="shoulder_link" />
     <child link="upper_arm_link" />
-    <origin rpy="1.57201212277 1.047 -4.22293331334e-06" xyz="0.000175875481034 0 0" />
+    <origin rpy="1.57201212277 0 -4.22293331334e-06" xyz="0.000175875481034 0 0" />
     <axis xyz="0 0 1" />
     <limit effort="150.0" lower="-6.28318530718" upper="6.28318530718" velocity="3.14" />
     <dynamics damping="0.0" friction="0.0" />
@@ -166,7 +166,7 @@
   <joint name="elbow_joint" type="revolute">
     <parent link="upper_arm_link" />
     <child link="forearm_link" />
-    <origin rpy="3.14087106174 3.14130791395 -1.047" xyz="-0.425282422158 0 0" />
+    <origin rpy="3.14087106174 3.14130791395 -3.1415908958" xyz="-0.425282422158 0 0" />
     <axis xyz="0 0 1" />
     <limit effort="150.0" lower="-3.14159265359" upper="3.14159265359" velocity="3.14" />
     <dynamics damping="0.0" friction="0.0" />
@@ -197,7 +197,7 @@
   <joint name="wrist_1_joint" type="revolute">
     <parent link="forearm_link" />
     <child link="wrist_1_link" />
-    <origin rpy="3.13857728923 -3.14158422042 -1.047"
+    <origin rpy="3.13857728923 -3.14158422042 3.14159213673"
       xyz="-0.392424671078 0.000403177258085 0.13370723674" />
     <axis xyz="0 0 1" />
     <limit effort="28.0" lower="-6.28318530718" upper="6.28318530718" velocity="6.28" />
@@ -229,7 +229,7 @@
   <joint name="wrist_2_joint" type="revolute">
     <parent link="wrist_1_link" />
     <child link="wrist_2_link" />
-    <origin rpy="1.57047823229 1.571 -1.22657964634e-06"
+    <origin rpy="1.57047823229 0 -1.22657964634e-06"
       xyz="-3.59538768323e-05 -0.0997732519853 3.17373243326e-05" />
     <axis xyz="0 0 1" />
     <limit effort="28.0" lower="-6.28318530718" upper="6.28318530718" velocity="6.28" />
@@ -416,12 +416,6 @@
         <color rgba="0 0 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <cylinder length="0.1" radius="0.005" />
-      </geometry>
-    </collision>
   </link>
 
   <joint name="ee_probe_tip_joint" type="fixed">

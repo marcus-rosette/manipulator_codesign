@@ -4,7 +4,7 @@ import time
 from pyb_utils import PybUtils
 from load_objects import LoadObjects
 from load_robot import LoadRobot
-from sample_approach_points import SamplePoints
+from sample_approach_points import prune_arc, sample_hemisphere_suface_pts, hemisphere_orientations
 from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
 
 
@@ -13,17 +13,10 @@ class PrunerEnv:
         self.pyb = PybUtils(self, renders=renders)
         self.object_loader = LoadObjects(self.pyb.con)
         self.robot = LoadRobot(self.pyb.con, robot_urdf_path, [self.object_loader.start_x, 0, 0], self.pyb.con.getQuaternionFromEuler([0, 0, 0]))
-        self.point_sampler = SamplePoints(self.pyb.con, planar)
         
     def simple_controller(self, target_joint_positions, position_tol=0.1, planar=True):
         # Iterate over the joints and set their positions
-        for i, joint_idx in enumerate(self.robot.controllable_joint_idx):
-            p.setJointMotorControl2(
-                bodyIndex=self.robot.robotId,
-                jointIndex=joint_idx,
-                controlMode=p.POSITION_CONTROL,
-                targetPosition=target_joint_positions[i]
-            )
+        self.robot.set_joint_positions(target_joint_positions)
 
         # Wait until the manipulator reaches the target positions
         while True:
@@ -136,14 +129,15 @@ class PrunerEnv:
 
 def main():
     simple_control = False
-    save_data = False
-    planar = False
+    save_data = True
+    planar = True
+    rrt_control = False
 
-    pruner_env = PrunerEnv(robot_urdf_path="./urdf/ur5e/ur5e_cart.urdf", planar=planar)
+    pruner_env = PrunerEnv(robot_urdf_path="./urdf/ur5e/ur5e_cart.urdf", planar=planar, renders=False)
     prune_point = pruner_env.object_loader.prune_point_1_pos
 
     # Parameters for 2D arc manipulability search
-    num_arc_points = 30
+    num_arc_points = 60
 
     # Parameters for 3D hemisphere manipulability search
     num_hemisphere_points = [2, 2] # [num_theta, num_phi]
@@ -151,34 +145,32 @@ def main():
     hemisphere_radius = 0.1  
 
     if planar:
-        goal_coords, goal_orientations = pruner_env.point_sampler.prune_arc(prune_point,
-                                                                            radius=0.1, 
-                                                                            allowance_angle=np.deg2rad(30), 
-                                                                            num_arc_points=num_arc_points, 
-                                                                            y_ori_default=0, 
-                                                                            z_ori_default=0)
+        goal_coords, goal_orientations = prune_arc(prune_point,
+                                                    radius=0.1, 
+                                                    allowance_angle=np.deg2rad(30), 
+                                                    num_arc_points=num_arc_points, 
+                                                    y_ori_default=0, 
+                                                    z_ori_default=0)
         num_points = num_arc_points
         sys_manipulability = np.zeros((num_points, 1))
     else:
-        goal_coords = pruner_env.point_sampler.sample_hemisphere_suface_pts(prune_point, look_at_point_offset, hemisphere_radius, num_hemisphere_points)
-        goal_orientations = pruner_env.point_sampler.hemisphere_orientations(prune_point, goal_coords)
+        goal_coords = sample_hemisphere_suface_pts(prune_point, look_at_point_offset, hemisphere_radius, num_hemisphere_points)
+        goal_orientations = hemisphere_orientations(prune_point, goal_coords)
         num_points = len(goal_coords)
         sys_manipulability = np.zeros((num_points, 1))
 
     if simple_control:
-        # poi = int(num_arc_points / 2)
         poi = 0
         start_end_effector_pos, start_end_effector_orientation = pruner_env.robot.get_link_state(pruner_env.robot.end_effector_index)
 
         new_goal_pos = [0.5, 0.6, 0.85]
         new_goal_ori = pruner_env.pyb.con.getQuaternionFromEuler([0.5, 0, 0])
 
-        target_joint_positions = np.array(pruner_env.pyb.con.calculateInverseKinematics(pruner_env.robot.robotId, pruner_env.robot.end_effector_index, goal_coords[poi], goal_orientations[poi]))
+        target_joint_positions = np.array(pruner_env.robot.inverse_kinematics(goal_coords[poi], goal_orientations[poi]))
 
         length = 0.1
         for i in range(num_points):
             start_point = goal_coords[i]
-            # print(start_point)
 
             # Convert back to euler (SOMETIMES HAS ABIGUITY BETWEEN -PI TO PI)
             angle = pruner_env.pyb.con.getEulerFromQuaternion(goal_orientations[i])
@@ -192,7 +184,7 @@ def main():
 
     else:
         if save_data:
-            data_filename = "prrr_y_arc_manip_new"
+            data_filename = "ur5_planar_arc_manip"
 
             input(f"\nSaving data to: {data_filename}.csv. Press Enter if correct")
 
@@ -204,25 +196,27 @@ def main():
         extend_fn = get_extend_fn(pruner_env.robot.robotId, controllable_joints)
         collision_fn = get_collision_fn(pruner_env.robot.robotId, controllable_joints, pruner_env.object_loader.collision_objects)
 
-        # sys_manipulability = np.zeros((num_arc_points, 1))
-
         for point in range(num_points):
             # sample_fn = pruner_env.vector_field_sample_fn(goal_coords[point], goal_orientations[point], alpha=0.6)
             sample_fn = pruner_env.new_sample_fn(goal_coords[point], goal_orientations[point], alpha=0.6)
             # sample_fn = get_sample_fn(pruner_env.robotId, controllable_joints)
 
             goal_conf = pruner_env.robot.inverse_kinematics(goal_coords[point], goal_orientations[point])
-            
-            manipulability_max, path_best = pruner_env.rrtc_loop(goal_coords[point], goal_orientations[point], 
-                                                                start_conf, goal_conf, 
-                                                                sample_fn, 
-                                                                distance_fn, 
-                                                                extend_fn, 
-                                                                collision_fn, 
-                                                                pos_tol=0.1,
-                                                                ori_tol=0.5,
-                                                                planar=False, 
-                                                                max_iter=200)
+
+            if rrt_control:
+                manipulability_max, path_best = pruner_env.rrtc_loop(goal_coords[point], goal_orientations[point], 
+                                                                    start_conf, goal_conf, 
+                                                                    sample_fn, 
+                                                                    distance_fn, 
+                                                                    extend_fn, 
+                                                                    collision_fn, 
+                                                                    pos_tol=0.1,
+                                                                    ori_tol=0.5,
+                                                                    planar=False, 
+                                                                    max_iter=500)
+
+            else:
+                manipulability_max = pruner_env.robot.calculate_manipulability(goal_conf, planar=False)
             
             print(f"Highest manipulability found: {np.round(manipulability_max, 5)}")
             sys_manipulability[point] = manipulability_max

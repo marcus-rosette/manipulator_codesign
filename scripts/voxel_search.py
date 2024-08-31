@@ -31,6 +31,12 @@ if __name__ == "__main__":
     voxel_centers = voxel_data[:, :3]
     voxel_indices = voxel_data[:, 3:]
 
+    # Translate voxels in front of robot
+    y_trans = 0.5
+    voxel_centers_shifted = np.copy(voxel_centers)
+    voxel_centers_shifted[:, 1] += y_trans
+    voxel_centers = voxel_centers_shifted
+
     paths = np.load('./data/voxel_paths_parallelepiped.npy')
 
     target_point = np.array([0.1, 0.6, 1.2]) 

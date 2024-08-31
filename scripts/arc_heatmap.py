@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-data = np.loadtxt("./data/prrr_y_arc_manip.csv")
+data = np.loadtxt("./data/ur5_planar_arc_manip.csv")
 
 point = data[:, :3]
 orientation = data[:, 3:7]
