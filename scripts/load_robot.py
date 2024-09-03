@@ -1,10 +1,12 @@
 import numpy as np
 import time
 from scipy.interpolate import CubicSpline
+from scipy.spatial.transform import Slerp, Rotation
+from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
 
 
 class LoadRobot:
-    def __init__(self, con, robot_urdf_path: str, start_pos, start_orientation, home_config) -> None:
+    def __init__(self, con, robot_urdf_path: str, start_pos, start_orientation, home_config, collision_objects=None) -> None:
         """ Robot loader class
 
         Args:
@@ -21,6 +23,9 @@ class LoadRobot:
         self.start_orientation = start_orientation
         self.home_config = home_config
         self.robotId = None
+        self.home_ee_pos = None
+        self.home_ee_ori = None
+        self.collision_objects = collision_objects
 
         self.setup_robot()
 
@@ -44,6 +49,12 @@ class LoadRobot:
 
         # Extract joint limits from urdf
         self.joint_limits = [self.con.getJointInfo(self.robotId, i)[8:10] for i in self.controllable_joint_idx]
+
+        # Set the home position
+        self.reset_joint_positions(self.home_config)
+
+        # Get the starting end-effector pos
+        self.home_ee_pos, self.home_ee_ori = self.get_link_state(self.end_effector_index)
 
     def set_joint_positions(self, joint_positions):
         for i, joint_idx in enumerate(self.controllable_joint_idx):
@@ -69,12 +80,26 @@ class LoadRobot:
         link_orientation = np.array(link_state[1])
         return link_position, link_orientation
     
-    def is_collision(self):
-        return len(self.con.getContactPoints(self.robotId)) > 0
+    def check_collision_aabb(self, robot_id, plane_id):
+        # Get AABB for the plane (ground)
+        plane_aabb = self.con.getAABB(plane_id)
+
+        # Iterate over each link of the robot
+        for i in self.controllable_joint_idx:
+            link_aabb = self.con.getAABB(robot_id, i)
+            
+            # Check for overlap between AABBs
+            if (link_aabb[1][0] >= plane_aabb[0][0] and link_aabb[0][0] <= plane_aabb[1][0] and
+                link_aabb[1][1] >= plane_aabb[0][1] and link_aabb[0][1] <= plane_aabb[1][1] and
+                link_aabb[1][2] >= plane_aabb[0][2] and link_aabb[0][2] <= plane_aabb[1][2]):
+                return True
+
+        return False
     
     def inverse_kinematics(self, position, orientation=None, pos_tol=1e-4):
         lower_limits = [t[0] for t in self.joint_limits]
         upper_limits = [t[1] for t in self.joint_limits]
+        joint_ranges = [upper - lower for lower, upper in zip(lower_limits, upper_limits)]
 
         if orientation is not None:
             joint_positions = self.con.calculateInverseKinematics(
@@ -84,10 +109,10 @@ class LoadRobot:
                 orientation, 
                 lowerLimits=lower_limits,
                 upperLimits=upper_limits,
-                jointRanges=[upper - lower for lower, upper in zip(lower_limits, upper_limits)],
-                # restPoses=[0] * len(self.controllable_joint_idx),
+                jointRanges=joint_ranges,
                 restPoses=self.home_config,
-                residualThreshold=pos_tol)
+                residualThreshold=pos_tol
+                )
         else:
             joint_positions = self.con.calculateInverseKinematics(
                 self.robotId, 
@@ -95,74 +120,65 @@ class LoadRobot:
                 position, 
                 lowerLimits=lower_limits,
                 upperLimits=upper_limits,
-                jointRanges=[upper - lower for lower, upper in zip(lower_limits, upper_limits)],
-                # restPoses=[0] * len(self.controllable_joint_idx),
+                jointRanges=joint_ranges,
                 restPoses=self.home_config,
-                residualThreshold=pos_tol)
+                residualThreshold=pos_tol
+                )
         return joint_positions
     
-    def linear_interp_path(self, start_positions, end_positions, steps=100):
-        """ Interpolate linear joint positions between a start and end configuration
+    def clip_joint_vals(self, joint_config):
+        joint_config = np.array(joint_config)
 
-        Args:
-            end_positions (float list): end joint configuration
-            start_positions (float list, optional): start joint configuration. Defaults to [0.0]*6.
-            steps (int, optional): number of interpolated positions. Defaults to 100.
+        limit = np.pi
 
-        Returns:
-            list: interpolated path
-        """
-        interpolated_joint_angles = [np.linspace(start, end, steps) for start, end in zip(start_positions, end_positions)]
-        return [tuple(p) for p in zip(*interpolated_joint_angles)]
+        # Add 2pi to values less than -2pi
+        joint_config = np.where(joint_config < -limit, joint_config + 2 * np.pi, joint_config)
 
-    def spherical_linear_interp_path(self, start_positions, end_positions, steps=100):
-        """ Interpolate linear joint positions between a start and end configuration
+        # Subtract 2pi from values greater than 2pi
+        joint_config = np.where(joint_config > limit, joint_config - 2 * np.pi, joint_config)
 
-        Args:
-            end_positions (float list): end joint configuration
-            start_positions (float list, optional): start joint configuration. Defaults to [0.0]*6.
-            steps (int, optional): number of interpolated positions. Defaults to 100.
-
-        Returns:
-            list: interpolated path
-        """
-        interpolated_joint_angles = []
-        for start, end in zip(start_positions, end_positions):
-            # Wrap angles to the range [-pi, pi]
-            start = self.wrap_angle(start)
-            end = self.wrap_angle(end)
-            
-            # Calculate linear interpolation
-            delta = end - start
-            if abs(delta) > np.pi:
-                # Adjust for wrap-around
-                if delta > 0:
-                    end -= 2 * np.pi
-                else:
-                    end += 2 * np.pi
-                delta = end - start
-            
-            interpolated_joint_angles.append(np.linspace(start, end, steps))
-        
-        return [tuple(p) for p in zip(*interpolated_joint_angles)]
-
-    def wrap_angle(self, angle):
-        """Wrap angle to the range [-pi, pi]."""
-        return (angle + np.pi) % (2 * np.pi) - np.pi
+        return joint_config
     
-    def cubic_interp_path(self, start_positions, end_positions, steps=100):
+    def linear_interp_path(self, start_positions, end_positions, steps=100, limit_joints=True):
+        """ Interpolate linear joint positions between a start and end configuration
+
+        Args:
+            end_positions (float list): end joint configuration
+            start_positions (float list, optional): start joint configuration
+            steps (int, optional): number of interpolated positions. Defaults to 100.
+            limit_joints (bool, optional): whether or not to clip the joints to the closest revolute equivalent
+
+        Returns:
+            list of tuple: interpolated joint positions
+        """
+        if limit_joints:
+            start_positions = self.clip_joint_vals(start_positions)
+            end_positions = self.clip_joint_vals(end_positions)
+
+        # Interpolate each joint individually
+        interpolated_joint_angles = [np.linspace(start, end, steps) for start, end in zip(start_positions, end_positions)]
+
+        # Extract each joint angle to a combined configuration
+        return np.array([tuple(p) for p in zip(*interpolated_joint_angles)])
+  
+    def cubic_interp_path(self, start_positions, end_positions, steps=100, limit_joints=True):
         """Interpolate joint positions using cubic splines between start and end configurations.
 
         Args:
-            start_positions (list of float): start joint configuration
-            end_positions (list of float): end joint configuration
+            end_positions (float list): end joint configuration
+            start_positions (float list, optional): start joint configuration
             steps (int, optional): number of interpolated positions. Defaults to 100.
+            limit_joints (bool, optional): whether or not to clip the joints to the closest revolute equivalent
 
         Returns:
             list of tuple: interpolated joint positions
         """
         num_joints = len(start_positions)
         t = np.linspace(0, 1, steps)
+
+        if limit_joints:
+            start_positions = self.clip_joint_vals(start_positions)
+            end_positions = self.clip_joint_vals(end_positions)
 
         interpolated_joint_angles = []
         for i in range(num_joints):
@@ -171,48 +187,64 @@ class LoadRobot:
 
         return [tuple(p) for p in zip(*interpolated_joint_angles)]
     
-    def linear_interp_end_effector_path(self, start_positions, end_positions, steps=100):
-        """
-        Interpolates a joint trajectory between start_positions and end_positions for a UR5 manipulator in PyBullet.
+    def sample_path_to_length(self, path, desired_length):
+        """ Takes a joint trajectory path of any length and interpolates to a desired array length
 
-        Parameters:
-        - start_positions: List or array of joint angles for the starting configuration.
-        - end_positions: List or array of joint angles for the ending configuration.
-        - steps: Number of interpolation steps.
+        Args:
+            path (float list): joint trajectory
+            desired_length (int): desired length of trajectory (number of rows)
 
         Returns:
-        - trajectory: List of joint configurations representing the interpolated trajectory.
+            float list: joint trajectory of desired length
         """
-        trajectory = [start_positions]  # Ensure the first config is always the start_config
-        end_effector_positions = [self.get_link_state(self.end_effector_index)[0]]  # Get the initial end-effector position
+        path = np.array(path)
+        current_path_len = path.shape[0] # Number of rows
+        num_joints = path.shape[1] # Numer of columns
 
-        # Generate linearly interpolated joint angles
-        for i in range(steps-1):
-            t = i / (steps - 1)
-            interpolated_config = np.array(start_positions) * (1 - t) + np.array(end_positions) * t
-            trajectory.append(interpolated_config.tolist())
-        
-        # Ensure linear end-effector path
-        for config in trajectory:
-            self.reset_joint_positions(config)
-            end_effector_pos, _ = self.get_link_state(self.end_effector_index)
-            end_effector_positions.append(end_effector_pos)
-        
-        # Re-interpolate to ensure a linear end-effector path
-        end_effector_positions = np.array(end_effector_positions)
-        start_pos, end_pos = end_effector_positions[0], end_effector_positions[-1]
-        for i in range(steps-1):
-            t = i / (steps - 1)
-            expected_pos = start_pos * (1 - t) + end_pos * t
-            actual_pos = end_effector_positions[i]
-            correction = expected_pos - actual_pos
+        # Generate new indices for interpolation
+        new_indices = np.linspace(0, current_path_len - 1, desired_length)
 
-            # Apply correction to the trajectory
-            corrected_config = self.inverse_kinematics(actual_pos + correction)
-            trajectory[i] = np.array(corrected_config).tolist()
+        # Interpolate each column separately
+        return np.array([np.interp(new_indices, np.arange(current_path_len), path[:, i]) for i in range(num_joints)]).T
+
+    def vector_field_sample_fn(self, goal_position, alpha=0.8):
+        def sample():
+            random_conf = np.random.uniform([limit[0] for limit in self.joint_limits], 
+                                            [limit[1] for limit in self.joint_limits])
+            self.set_joint_positions(random_conf)
+            end_effector_position, _ = self.get_link_state(self.end_effector_index)
+            
+            vector_to_goal = np.array(goal_position) - end_effector_position
+            guided_position = end_effector_position + vector_to_goal
+            # guided_conf = np.array(self.robot.inverse_kinematics(guided_position, goal_orientation))
+            guided_conf = np.array(self.inverse_kinematics(guided_position))
+            final_conf = (1 - alpha) * random_conf + alpha * guided_conf
+            
+            return final_conf
+        return sample
+
+    def rrt_path(self, start_positions, end_positions, target_pos=None, steps=100, rrt_iter=500):
+        extend_fn = get_extend_fn(self.robotId, self.controllable_joint_idx)
+        collision_fn = get_collision_fn(self.robotId, self.controllable_joint_idx, self.collision_objects)
+        distance_fn = get_distance_fn(self.robotId, self.controllable_joint_idx)
+        # sample_fn = get_sample_fn(self.robotId, self.controllable_joint_idx)
+        sample_fn = self.vector_field_sample_fn(target_pos)
+
+        path = rrt_connect(
+            start_positions, end_positions,
+            extend_fn=extend_fn,
+            collision_fn=collision_fn,
+            distance_fn=distance_fn,
+            sample_fn=sample_fn,
+            max_iterations=rrt_iter
+        )
         
-        return trajectory
-    
+        # Ensure the path has exactly `steps` joint configurations
+        if path:
+            path = self.sample_path_to_length(path, steps)
+        
+        return path
+
     def quaternion_angle_difference(self, q1, q2):
         # Compute the quaternion representing the relative rotation
         q1_conjugate = q1 * np.array([1, -1, -1, -1])  # Conjugate of q1
