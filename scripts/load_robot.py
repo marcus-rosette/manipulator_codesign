@@ -49,6 +49,9 @@ class LoadRobot:
 
         # Extract joint limits from urdf
         self.joint_limits = [self.con.getJointInfo(self.robotId, i)[8:10] for i in self.controllable_joint_idx]
+        self.lower_limits = [t[0] for t in self.joint_limits]
+        self.upper_limits = [t[1] for t in self.joint_limits]
+        self.joint_ranges = [upper - lower for lower, upper in zip(self.lower_limits, self.upper_limits)]
 
         # Set the home position
         self.reset_joint_positions(self.home_config)
@@ -100,9 +103,6 @@ class LoadRobot:
         if rest_config is None:
             rest_config = self.home_config
 
-        lower_limits = [t[0] for t in self.joint_limits]
-        upper_limits = [t[1] for t in self.joint_limits]
-        joint_ranges = [upper - lower for lower, upper in zip(lower_limits, upper_limits)]
 
         if orientation is not None:
             joint_positions = self.con.calculateInverseKinematics(
@@ -110,9 +110,9 @@ class LoadRobot:
                 self.end_effector_index, 
                 position, 
                 orientation, 
-                lowerLimits=lower_limits,
-                upperLimits=upper_limits,
-                jointRanges=joint_ranges,
+                lowerLimits=self.lower_limits,
+                upperLimits=self.upper_limits,
+                jointRanges=self.joint_ranges,
                 restPoses=rest_config,
                 residualThreshold=pos_tol
                 )
@@ -121,13 +121,64 @@ class LoadRobot:
                 self.robotId, 
                 self.end_effector_index, 
                 position, 
-                lowerLimits=lower_limits,
-                upperLimits=upper_limits,
-                jointRanges=joint_ranges,
+                lowerLimits=self.lower_limits,
+                upperLimits=self.upper_limits,
+                jointRanges=self.joint_ranges,
                 restPoses=rest_config,
                 residualThreshold=pos_tol
                 )
         return joint_positions
+    
+    def minimize_angle_change(self, start_angle, end_angle):
+        """
+        Finds the shortest path between start_angle and end_angle, considering
+        the wrapping behavior of angles within [-2pi, 2pi].
+
+        Parameters:
+        - start_angle: float, the starting joint angle
+        - end_angle: float, the desired final joint angle
+
+        Returns:
+        - adjusted_end_angle: float, the adjusted end_angle to minimize the movement
+        """
+        # Normalize the angles to the range [-pi, pi]
+        delta = (end_angle - start_angle + np.pi) % (2 * np.pi) - np.pi
+        return start_angle + delta
+    
+    def interpolate_joint_positions(self, start_config, end_config, num_steps):
+        """
+        Interpolates joint positions from start_config to end_config ensuring
+        that joint values stay within [-2pi, 2pi] for each joint.
+
+        Parameters:
+        - start_config: numpy array of shape (n,), start joint positions
+        - end_config: numpy array of shape (n,), end joint positions
+        - num_steps: int, number of interpolation steps
+
+        Returns:
+        - interpolated_configs: numpy array of shape (num_steps, n), interpolated joint positions
+        """
+
+        start_config = np.array(start_config)
+        end_config = np.array(end_config)
+
+        # Create an array for the interpolated configurations
+        interpolated_configs = np.zeros((num_steps, len(start_config)))
+
+        # Loop over each joint to interpolate using minimal angular changes
+        for j in range(len(start_config)):
+            # Adjust end angle to minimize the angular movement
+            adjusted_end = self.minimize_angle_change(start_config[j], end_config[j])
+            
+            # Interpolate linearly between the start and adjusted end angles
+            for i in range(num_steps):
+                alpha = i / (num_steps - 1)  # Interpolation factor between 0 and 1
+                interpolated_value = (1 - alpha) * start_config[j] + alpha * adjusted_end
+
+                # Ensure the joint value stays within [-2pi, 2pi]
+                interpolated_configs[i, j] = np.clip(interpolated_value, self.lower_limits[j], self.upper_limits[j])
+
+        return interpolated_configs
     
     def clip_joint_vals(self, joint_config):
         joint_config = np.array(joint_config)

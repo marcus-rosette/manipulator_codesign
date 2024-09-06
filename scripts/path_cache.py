@@ -89,12 +89,7 @@ class PathCache:
                     best_manipulability = manipulability
 
                     # Interpolate a path from the starting configuration to the best IK solution
-                    best_path = self.robot.linear_interp_path(self.robot_home_pos, joint_angles, steps=num_configs_in_path, limit_joints=True)
-                    # best_path = self.robot.task_and_joint_interp(
-                    #     start_pose=np.concatenate((self.robot.home_ee_pos, self.robot.home_ee_ori)), 
-                    #     end_pose=np.concatenate((target_position, target_orientation)),
-                    #     end_config=joint_angles,
-                    #     steps=num_configs_in_path)
+                    best_path = self.robot.interpolate_joint_positions(self.robot_home_pos, joint_angles, num_configs_in_path)
 
             best_iks[i, :] = best_ik
             best_ee_positions[i, :] = best_ee_pos
