@@ -33,10 +33,6 @@ coordinates = np.vstack((x_flat, y_flat, z_flat)).T
 # Remove duplicate rows from the coordinates array
 coordinates_unique = np.unique(coordinates, axis=0)
 
-# Now, coordinates is an array of shape (num_theta * num_phi, 3),
-# where each row is an (x, y, z) point on the hemisphere.
-print("Sampled Hemisphere Coordinates:\n", coordinates_unique)
-
 # Hemisphere vertex (center of the hemisphere)
 vertex = np.array(origin)
 
@@ -47,6 +43,23 @@ vectors = vertex - np.stack((x, y, z), axis=-1)
 norms = np.linalg.norm(vectors, axis=2)
 vectors /= norms[:, :, np.newaxis]
 
+# Filter the points to keep only those within ±30 degrees from the y-axis
+# Calculate the angle from the y-axis for each point
+angles_from_y = np.arccos(np.abs((coordinates_unique[:, 1] - origin[1]) / radius))
+
+# Convert 30 degrees to radians
+angle_threshold = np.deg2rad(30)
+
+# Filter the coordinates based on the angle threshold
+filtered_coordinates = coordinates_unique[angles_from_y <= angle_threshold]
+
+# Extract the filtered x, y, z coordinates
+x_filtered = filtered_coordinates[:, 0]
+y_filtered = filtered_coordinates[:, 1]
+z_filtered = filtered_coordinates[:, 2]
+
+coordinates_filtered = np.vstack((x_filtered, y_filtered, z_filtered)).T
+
 # Plot the hemisphere and discretized points
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
@@ -54,8 +67,9 @@ ax = fig.add_subplot(111, projection='3d')
 # Plot the hemisphere surface
 ax.plot_surface(x, y, z, color='c', alpha=0.6, rstride=5, cstride=5)
 
-# # Plot the discrete points
+# Plot the discrete points
 # ax.scatter(x, y, z, color='r', s=10)
+ax.scatter(x_filtered, y_filtered, z_filtered, color='r', s=10)
 
 # # Plot the vectors pointing towards the center
 # for i in range(num_theta):

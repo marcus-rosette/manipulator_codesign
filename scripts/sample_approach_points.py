@@ -25,7 +25,7 @@ def prune_arc(prune_point, radius, allowance_angle, num_arc_points, y_ori_defaul
 
     return goal_coords, goal_orientations
 
-def sample_hemisphere_suface_pts(look_at_point, look_at_point_offset, radius, num_points=[30, 30]):
+def sample_hemisphere_suface_pts(look_at_point, look_at_point_offset, radius, num_points=[30, 30], angle_threshold=np.pi/6):
     """
     Generates points on the surface of a hemisphere that lies on the xz-plane protruding along the y-axis 
     """
@@ -55,8 +55,23 @@ def sample_hemisphere_suface_pts(look_at_point, look_at_point_offset, radius, nu
 
     # Combine the x, y, z arrays into a single array of points
     coordinates = np.vstack((x_flat, y_flat, z_flat)).T
+    
+    # Remove duplicate rows from the coordinates array
+    coordinates_unique = np.unique(coordinates, axis=0) 
 
-    return np.unique(coordinates, axis=0) # Remove duplicate rows from the coordinates array
+    # Filter the points to keep only those within ±30 degrees from the y-axis
+    # Calculate the angle from the y-axis for each point
+    angles_from_y = np.arccos(np.abs((coordinates_unique[:, 1] - origin[1]) / radius))
+
+    # Filter the coordinates based on the angle threshold
+    filtered_coordinates = coordinates_unique[angles_from_y <= angle_threshold]
+
+    # Extract the filtered x, y, z coordinates
+    x_filtered = filtered_coordinates[:, 0]
+    y_filtered = filtered_coordinates[:, 1]
+    z_filtered = filtered_coordinates[:, 2]
+
+    return np.vstack((x_filtered, y_filtered, z_filtered)).T
 
 def hemisphere_orientations(point1, points2):
     """

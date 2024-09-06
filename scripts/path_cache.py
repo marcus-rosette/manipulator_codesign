@@ -90,6 +90,11 @@ class PathCache:
 
                     # Interpolate a path from the starting configuration to the best IK solution
                     best_path = self.robot.linear_interp_path(self.robot_home_pos, joint_angles, steps=num_configs_in_path, limit_joints=True)
+                    # best_path = self.robot.task_and_joint_interp(
+                    #     start_pose=np.concatenate((self.robot.home_ee_pos, self.robot.home_ee_ori)), 
+                    #     end_pose=np.concatenate((target_position, target_orientation)),
+                    #     end_config=joint_angles,
+                    #     steps=num_configs_in_path)
 
             best_iks[i, :] = best_ik
             best_ee_positions[i, :] = best_ee_pos
@@ -101,7 +106,7 @@ class PathCache:
         end_effector_solu = np.hstack((best_iks, best_ee_positions, best_orienations, best_manipulabilities))
 
         # Remove rows with any NaN values
-        nan_mask = ~np.isnan(end_effector_solu).any(axis=1)
+        nan_mask = ~np.isnan(end_effector_solu).any(axis=1) 
         end_effector_solu_cleaned = end_effector_solu[nan_mask]
         best_paths_cleaned = best_paths[:, :, nan_mask]
 
@@ -112,6 +117,8 @@ class PathCache:
             # Save associated paths as a .npy file
             np.save(path_filename, best_paths_cleaned)
 
+            np.save('/home/marcus/ros2_ws/src/path_query/apple_approach/resources/task_space_linear_interp_paths.npy', best_paths_cleaned)
+
         return nan_mask
 
             
@@ -119,11 +126,12 @@ if __name__ == "__main__":
     render = False
     # robot_home_pos = [np.pi/2, -np.pi/3, 2*np.pi/3, 2*np.pi/3, -np.pi/2, 0]
     robot_home_pos = [0, -np.pi/2, 0, -np.pi/2, 0, 0]
+    # robot_home_pos = [0, 0, 0, 0, 0, 0]
     path_cache = PathCache(robot_urdf_path="./urdf/ur5e/ur5e.urdf", renders=render, robot_home_pos=robot_home_pos)
 
     num_hemisphere_points = [8, 8] # [num_theta, num_phi]
-    look_at_point_offset = 0.1
-    hemisphere_radius = 0.1
+    look_at_point_offset = 0.0
+    hemisphere_radius = 0.15
 
     voxel_data = np.loadtxt('./data/voxel_data_parallelepiped.csv')
     voxel_centers = voxel_data[:, :3]
@@ -135,12 +143,24 @@ if __name__ == "__main__":
     voxel_centers_shifted[:, 1] += y_trans
     voxel_centers = voxel_centers_shifted
 
+    num_configs_in_path = 250
     save_data_filename = './data/voxel_ik_solutions_parallelepiped.csv'
-    path_filename = './data/linear_interp_paths_limited'
+    path_filename = './data/task_space_linear_interp_paths'
     
-    nan_mask = path_cache.find_high_manip_ik(voxel_centers, num_hemisphere_points, look_at_point_offset, hemisphere_radius, save_data_filename=save_data_filename, path_filename=path_filename)
+    nan_mask = path_cache.find_high_manip_ik(voxel_centers, 
+                                             num_hemisphere_points, 
+                                             look_at_point_offset, 
+                                             hemisphere_radius, 
+                                             num_configs_in_path=num_configs_in_path, 
+                                             save_data_filename=save_data_filename, 
+                                             path_filename=path_filename)
 
     # Filtered voxel_data
     voxel_data_filtered = voxel_centers[nan_mask]
-    filename = './data/linear_filtered_voxels_limited.csv'
+    print(voxel_data_filtered.shape)
+    filename = './data/task_space_filtered_voxels_centers.csv'
     np.savetxt(filename, voxel_data_filtered)
+
+    filename2 = '/home/marcus/ros2_ws/src/path_query/apple_approach/resources/task_space_filtered_voxels_centers.csv'
+    np.savetxt(filename2, voxel_data_filtered)
+    

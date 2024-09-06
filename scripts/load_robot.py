@@ -96,7 +96,10 @@ class LoadRobot:
 
         return False
     
-    def inverse_kinematics(self, position, orientation=None, pos_tol=1e-4):
+    def inverse_kinematics(self, position, orientation=None, pos_tol=1e-4, rest_config=None):
+        if rest_config is None:
+            rest_config = self.home_config
+
         lower_limits = [t[0] for t in self.joint_limits]
         upper_limits = [t[1] for t in self.joint_limits]
         joint_ranges = [upper - lower for lower, upper in zip(lower_limits, upper_limits)]
@@ -110,7 +113,7 @@ class LoadRobot:
                 lowerLimits=lower_limits,
                 upperLimits=upper_limits,
                 jointRanges=joint_ranges,
-                restPoses=self.home_config,
+                restPoses=rest_config,
                 residualThreshold=pos_tol
                 )
         else:
@@ -121,7 +124,7 @@ class LoadRobot:
                 lowerLimits=lower_limits,
                 upperLimits=upper_limits,
                 jointRanges=joint_ranges,
-                restPoses=self.home_config,
+                restPoses=rest_config,
                 residualThreshold=pos_tol
                 )
         return joint_positions
@@ -129,7 +132,7 @@ class LoadRobot:
     def clip_joint_vals(self, joint_config):
         joint_config = np.array(joint_config)
 
-        limit = np.pi
+        limit = 3.0
 
         # Add 2pi to values less than -2pi
         joint_config = np.where(joint_config < -limit, joint_config + 2 * np.pi, joint_config)
@@ -160,6 +163,130 @@ class LoadRobot:
 
         # Extract each joint angle to a combined configuration
         return np.array([tuple(p) for p in zip(*interpolated_joint_angles)])
+    
+    def task_space_path_interp(self, start_pose, end_pose, end_config, steps=100, max_jump=0.19):
+        # Interpolate each pose value individually
+        interpolated_poses = [np.linspace(start, end, steps) for start, end in zip(start_pose, end_pose)]
+
+        # Extract each value to a combined pose
+        poses = np.array([tuple(p) for p in zip(*interpolated_poses)])
+        
+        joint_traj = np.zeros((steps, len(self.controllable_joint_idx)))
+        joint_traj[0, :] = self.clip_joint_vals(self.home_config)
+        joint_traj[-1, :] = self.clip_joint_vals(end_config)
+
+        for i in range(1, joint_traj.shape[0] - 1):
+            point = poses[i, :3]        # Extract position
+            orientation = poses[i, 3:]  # Extract orientation
+
+            # Use the previous joint configuration as the seed (rest configuration) for IK
+            previous_joint_config = joint_traj[i-1, :]
+
+            # Compute the next joint configuration using inverse kinematics
+            ik_solution = self.inverse_kinematics(point, orientation, rest_config=list(previous_joint_config))
+            
+            # Clip the joint values to stay within joint limits
+            joint_traj[i, :] = self.clip_joint_vals(ik_solution)
+
+        # Smooth the transition from the start configuration
+        transition_steps = int(np.floor(steps * 0.4))
+        for i in range(1, transition_steps):
+            alpha = i / transition_steps
+            joint_traj[i, :] = (1 - alpha) * joint_traj[0, :] + alpha * joint_traj[i, :]
+
+        # Smooth the transition to the end configuration
+        for i in range(steps - transition_steps, steps - 1):
+            alpha = (i - (steps - transition_steps)) / transition_steps
+            joint_traj[i, :] = (1 - alpha) * joint_traj[i, :] + alpha * joint_traj[-1, :]
+
+        # smoothed_traj = np.copy(joint_traj)
+
+        # # Calculate the difference between consecutive joint configurations
+        # differences = np.abs(np.diff(joint_traj, axis=0))
+        
+        # # Find indices where the difference exceeds the max_jump threshold
+        # exceeding_indices = np.argwhere(differences > max_jump)
+        
+        # # Adjust indices to reflect the original joint_traj array
+        # for i, j in exceeding_indices:
+        #     if i < steps - 2:  # Ensure we do not exceed bounds
+        #         # Replace the next value with the average of the previous and the following value
+        #         smoothed_traj[i + 1, j] = (smoothed_traj[i, j] + smoothed_traj[i + 2, j]) / 2
+
+        return joint_traj
+    
+    def task_and_joint_interp(self, start_pose, end_pose, end_config, steps=250):
+        start = self.clip_joint_vals(self.home_config)  # Start configuration
+        end = self.clip_joint_vals(end_config)  # End configuration
+
+        # Number of midpoints (excluding start and end)
+        num_midpoints = 25
+        poses = np.linspace(start_pose, end_pose, num_midpoints + 2)
+
+        # Initialize joint trajectory with zeros
+        joint_traj = np.zeros((num_midpoints + 2, 6))
+        
+        # Set start and end configurations
+        joint_traj[0, :] = start
+        joint_traj[-1, :] = end
+
+        # Populate joint trajectory using inverse kinematics
+        for i in range(1, joint_traj.shape[0] - 1):
+            point = poses[i, :3]        # Extract position
+            orientation = poses[i, 3:]  # Extract orientation
+
+            # Use the previous joint configuration as the seed (rest configuration) for IK
+            previous_joint_config = joint_traj[i - 1, :]
+
+            # Compute the next joint configuration using inverse kinematics
+            ik_solution = self.inverse_kinematics(point, orientation, rest_config=list(previous_joint_config))
+            
+            # Clip the joint values to stay within joint limits
+            joint_traj[i, :] = self.clip_joint_vals(ik_solution)
+        
+        # Total number of segments (between start, midpoints, and end)
+        num_segments = num_midpoints + 1
+
+        # Calculate base points per segment and the remainder
+        points_per_segment = (steps - 1) // num_segments  # -1 to account for the final step
+        remainder = (steps - 1) % num_segments  # Extra points to distribute
+
+        # List to hold interpolated segments
+        interpolated_segments = []
+
+        # Interpolation loop through all segments
+        for i in range(num_segments):
+            # Distribute remainder points evenly across some segments
+            segment_steps = points_per_segment + (1 if i < remainder else 0) + 1  # +1 to include endpoint
+            
+            # Interpolation factors for the current segment
+            t = np.linspace(0, 1, segment_steps)
+            
+            # Interpolate between current point and the next
+            interp_segment = np.outer(1 - t, joint_traj[i]) + np.outer(t, joint_traj[i + 1])
+            interpolated_segments.append(interp_segment)
+
+        # Stack all segments, avoiding duplicate points at segment boundaries
+        combined_points = np.vstack([seg if idx == 0 else seg[1:] for idx, seg in enumerate(interpolated_segments)])
+
+        # Clip joint values and return the combined points while preserving start and end
+        combined_points[0, :] = start  # Ensure the first point is the original start config
+        combined_points[-1, :] = end   # Ensure the last point is the original end config
+
+        trajectory = self.clip_joint_vals(combined_points)
+
+        # Smooth the transition from the start configuration
+        transition_steps = int(np.floor(steps * 0.4))
+        for i in range(1, transition_steps):
+            alpha = i / transition_steps
+            trajectory[i, :] = (1 - alpha) * trajectory[0, :] + alpha * trajectory[i, :]
+
+        # Smooth the transition to the end configuration
+        for i in range(steps - transition_steps, steps - 1):
+            alpha = (i - (steps - transition_steps)) / transition_steps
+            trajectory[i, :] = (1 - alpha) * trajectory[i, :] + alpha * trajectory[-1, :]
+
+        return trajectory
   
     def cubic_interp_path(self, start_positions, end_positions, steps=100, limit_joints=True):
         """Interpolate joint positions using cubic splines between start and end configurations.
