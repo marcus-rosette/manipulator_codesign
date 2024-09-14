@@ -41,20 +41,28 @@ class AlignHemisphere:
         best_joint_config = []
         best_ee_point = []
 
+        # Define sphere parameters
+        radius = 0.01
+        mass = 0
+        collision_shape_id = self.pyb.con.createCollisionShape(shapeType=self.pyb.con.GEOM_SPHERE, radius=0.0001)
+        visual_shape_id = self.pyb.con.createVisualShape(shapeType=self.pyb.con.GEOM_SPHERE, radius=radius)
+
         max_manipulability = 0
         best_config = None
         for target_position, target_orientation in zip(hemisphere_pts, hemisphere_oris):
-            print(iteration)
-            # if iteration == 34:
             # Add a debug line between the two points
             line_id = self.pyb.con.addUserDebugLine(lineFromXYZ=target_position,
                                         lineToXYZ=look_at_point,
                                         lineColorRGB=[1, 0, 0],  # Red color
                                         lineWidth=2)
 
-
-            poi_id = self.pyb.con.loadURDF("sphere2.urdf", target_position, globalScaling=0.041, useFixedBase=True)
-            self.pyb.con.changeVisualShape(poi_id, -1, rgbaColor=[1, 0, 0, 1]) 
+            # Create the sphere body
+            sphere_id = self.pyb.con.createMultiBody(baseMass=mass,
+                                        baseCollisionShapeIndex=collision_shape_id,
+                                        baseVisualShapeIndex=visual_shape_id)
+            self.pyb.con.changeVisualShape(sphere_id, -1, rgbaColor=[1, 1, 1, 1]) 
+            # poi_id = self.pyb.con.loadURDF("sphere2.urdf", target_position, globalScaling=0.041, useFixedBase=True)
+            self.pyb.con.resetBasePositionAndOrientation(sphere_id, target_position, [0, 0, 0, 1])
 
             joint_angles = self.robot.inverse_kinematics(target_position, target_orientation)
 
@@ -63,9 +71,9 @@ class AlignHemisphere:
             manipulability = self.robot.calculate_manipulability(joint_angles, planar=False)
 
             if manipulability > max_manipulability:
-                # max_manipulability = manipulability
                 best_config = joint_angles
-                # best_ee_point = target_position
+                self.robot.reset_joint_positions(best_config)
+                self.robot.set_joint_positions(best_config)
 
             manips.append(manipulability)
             best_joint_config.append(joint_angles)
@@ -73,25 +81,32 @@ class AlignHemisphere:
             # print(f"Distance between hemisphere point and target: {np.linalg.norm(target_position - look_at_point)}")
 
             # Step simulation and render
-            for _ in range(240):  # Adjust number of simulation steps as needed
-                self.pyb.con.stepSimulation()
-                time.sleep(1./240.)  # Sleep to match real-time
+            # for _ in range(240):  # Adjust number of simulation steps as needed
+            #     self.pyb.con.stepSimulation()
+            #     time.sleep(1./240.)  # Sleep to match real-time
 
             # # Pause to view the result before moving to the next target
             # input("Press Enter to view the next target...")
 
             if iteration == 37:
-                poi_id = self.pyb.con.loadURDF("sphere2.urdf", target_position, globalScaling=0.05, useFixedBase=True)
-                self.pyb.con.changeVisualShape(poi_id, -1, rgbaColor=[1, 1, 1, 1]) 
+                # poi_id = self.pyb.con.loadURDF("sphere2.urdf", target_position, globalScaling=0.05, useFixedBase=True)
+                # self.pyb.con.changeVisualShape(poi_id, -1, rgbaColor=[1, 1, 1, 1]) 
+
+                # Define sphere parameters
+                radius = 0.015
+                mass = 0
+                collision_shape_id = self.pyb.con.createCollisionShape(shapeType=self.pyb.con.GEOM_SPHERE, radius=0.0001)
+                visual_shape_id = self.pyb.con.createVisualShape(shapeType=self.pyb.con.GEOM_SPHERE, radius=radius)
+
+                # Create the sphere body
+                sphere_id = self.pyb.con.createMultiBody(baseMass=mass,
+                                            baseCollisionShapeIndex=collision_shape_id,
+                                            baseVisualShapeIndex=visual_shape_id)
+                self.pyb.con.changeVisualShape(sphere_id, -1, rgbaColor=[0, 0, 1, 1]) 
+                self.pyb.con.resetBasePositionAndOrientation(sphere_id, target_position, [0, 0, 0, 1])
 
             iteration += 1
-        
-        best_manip = np.argsort(manips)[-3:][::-1]
-        print(best_manip)
-        best_idx = best_manip[0]
 
-        self.robot.reset_joint_positions(best_config)
-        self.robot.set_joint_positions(best_config)
 
         while True:
             self.pyb.con.stepSimulation()

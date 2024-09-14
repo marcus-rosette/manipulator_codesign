@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 import time
 from pyb_utils import PybUtils
 from load_objects import LoadObjects
@@ -19,6 +20,10 @@ class PathCache:
 
         self.robot_home_pos = robot_home_pos
         self.robot = LoadRobot(self.pyb.con, robot_urdf_path, [0, 0, 0], self.pyb.con.getQuaternionFromEuler([0, 0, 0]), self.robot_home_pos, collision_objects=self.object_loader.collision_objects)
+        
+        self.robot.reset_joint_positions(self.robot_home_pos)
+        start_position, start_orientation = self.robot.get_link_state(self.robot.end_effector_index)
+        self.start_pose = np.concatenate((start_position, start_orientation))
 
         self.ik_tol = ik_tol
 
@@ -35,9 +40,6 @@ class PathCache:
             path_filename (str, optional): file name/path for saving resultant paths. Defaults to None.
         """
         num_points = len(points)
-
-        # for pt in points:
-        #     self.object_loader.load_urdf('sphere2.urdf', start_pos=pt, radius=0.02)
 
         # Initialize arrays for saving data
         best_iks = np.zeros((num_points, len(self.robot.controllable_joint_idx)))
@@ -65,10 +67,13 @@ class PathCache:
 
             # Get IK solution for each target point on hemisphere and save the one with the highest manipulability 
             for target_position, target_orientation in zip(hemisphere_pts, hemisphere_oris):
+                # target_orientation = self.robot.limit_quaternion_y_rot(self.start_pose[3:], target_orientation)
+
+                # joint_angles = self.robot.inverse_kinematics(target_position, adjusted_target_quat)
                 joint_angles = self.robot.inverse_kinematics(target_position, target_orientation)
 
                 self.robot.reset_joint_positions(joint_angles)
-                link_pos, _ = self.robot.get_link_state(self.robot.end_effector_index)
+                ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
 
                 # If the target joint anlges result in a collisions, skip the iteration
                 collision_bool = self.robot.check_collision_aabb(self.robot.robotId, self.object_loader.planeId)
@@ -76,20 +81,21 @@ class PathCache:
                     continue
 
                 # If the distance between the desired point and found ik solution ee-point is greater than the tol, then skip the iteration
-                distance = np.linalg.norm(link_pos - target_position)
+                distance = np.linalg.norm(ee_pos - target_position)
                 if distance > self.ik_tol:
                     continue
 
                 manipulability = self.robot.calculate_manipulability(joint_angles, planar=False, visualize_jacobian=False)
                 
                 if manipulability > best_manipulability:
-                    best_ik = joint_angles
-                    best_ee_pos = target_position
-                    best_orienation = target_orientation
-                    best_manipulability = manipulability
-
                     # Interpolate a path from the starting configuration to the best IK solution
-                    best_path = self.robot.interpolate_joint_positions(self.robot_home_pos, joint_angles, num_configs_in_path)
+                    path, collision_in_path = self.robot.interpolate_joint_positions(self.robot_home_pos, joint_angles, num_configs_in_path)
+                    if not collision_in_path:
+                        best_path = path
+                        best_ik = joint_angles
+                        best_ee_pos = target_position
+                        best_orienation = target_orientation
+                        best_manipulability = manipulability
 
             best_iks[i, :] = best_ik
             best_ee_positions[i, :] = best_ee_pos
@@ -112,15 +118,15 @@ class PathCache:
             # Save associated paths as a .npy file
             np.save(path_filename, best_paths_cleaned)
 
-            np.save('/home/marcus/ros2_ws/src/path_query/apple_approach/resources/task_space_linear_interp_paths.npy', best_paths_cleaned)
+            np.save('/home/marcus/apple_harvest_ws/src/apple-harvest/harvest_control/resource/reachable_paths.npy', best_paths_cleaned)
 
         return nan_mask
 
             
 if __name__ == "__main__":
     render = False
-    # robot_home_pos = [np.pi/2, -np.pi/3, 2*np.pi/3, 2*np.pi/3, -np.pi/2, 0]
-    robot_home_pos = [0, -np.pi/2, 0, -np.pi/2, 0, 0]
+    robot_home_pos = [np.pi/2, -3*np.pi/4, np.pi/2, -3*np.pi/4, -np.pi/2, 0]
+    # robot_home_pos = [0, -np.pi/2, 0, -np.pi/2, 0, 0]
     # robot_home_pos = [0, 0, 0, 0, 0, 0]
     path_cache = PathCache(robot_urdf_path="./urdf/ur5e/ur5e.urdf", renders=render, robot_home_pos=robot_home_pos)
 
@@ -133,12 +139,12 @@ if __name__ == "__main__":
     voxel_indices = voxel_data[:, 3:]
 
     # Translate voxels in front of robot
-    y_trans = 0.45
+    y_trans = 0.75
     voxel_centers_shifted = np.copy(voxel_centers)
     voxel_centers_shifted[:, 1] += y_trans
     voxel_centers = voxel_centers_shifted
 
-    num_configs_in_path = 250
+    num_configs_in_path = 100
     save_data_filename = './data/voxel_ik_solutions_parallelepiped.csv'
     path_filename = './data/task_space_linear_interp_paths'
     
@@ -156,6 +162,6 @@ if __name__ == "__main__":
     filename = './data/task_space_filtered_voxels_centers.csv'
     np.savetxt(filename, voxel_data_filtered)
 
-    filename2 = '/home/marcus/ros2_ws/src/path_query/apple_approach/resources/task_space_filtered_voxels_centers.csv'
+    filename2 = '/home/marcus/apple_harvest_ws/src/apple-harvest/harvest_control/resource/reachable_voxel_centers.csv'
     np.savetxt(filename2, voxel_data_filtered)
     

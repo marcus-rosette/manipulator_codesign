@@ -2,6 +2,7 @@ import numpy as np
 import time
 from scipy.interpolate import CubicSpline
 from scipy.spatial.transform import Slerp, Rotation
+from scipy.spatial.transform import Rotation as R
 from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
 
 
@@ -66,6 +67,7 @@ class LoadRobot:
     def reset_joint_positions(self, joint_positions):
         for i, joint_idx in enumerate(self.controllable_joint_idx):
             self.con.resetJointState(self.robotId, joint_idx, joint_positions[i])
+            self.con.stepSimulation()
 
     def set_joint_path(self, joint_path):
         # Vizualize the interpolated positions
@@ -82,6 +84,13 @@ class LoadRobot:
         link_position = np.array(link_state[0])
         link_orientation = np.array(link_state[1])
         return link_position, link_orientation
+    
+    def check_self_collision(self, joint_config):
+        # Set the joint state and step the simulation
+        self.reset_joint_positions(joint_config)
+
+        # Return collision bool
+        return self.con.getContactPoints(bodyA=self.robotId, bodyB=self.robotId)
     
     def check_collision_aabb(self, robot_id, plane_id):
         # Get AABB for the plane (ground)
@@ -102,7 +111,6 @@ class LoadRobot:
     def inverse_kinematics(self, position, orientation=None, pos_tol=1e-4, rest_config=None):
         if rest_config is None:
             rest_config = self.home_config
-
 
         if orientation is not None:
             joint_positions = self.con.calculateInverseKinematics(
@@ -128,6 +136,32 @@ class LoadRobot:
                 residualThreshold=pos_tol
                 )
         return joint_positions
+    
+    def limit_quaternion_y_rot(self, start_quaternion, end_quaterion):
+        # Convert quaternions to scipy Rotation objects
+        start_rot = R.from_quat(start_quaternion)
+        target_rot = R.from_quat(end_quaterion)
+        
+        # Extract the rotation matrix from the starting quaternion
+        start_rot_matrix = start_rot.as_matrix()
+        
+        # Extract the y-axis rotation from the starting quaternion
+        y_axis_rotation_matrix = np.array([
+            [start_rot_matrix[0, 0], 0, start_rot_matrix[0, 2]],
+            [0, 1, 0],
+            [start_rot_matrix[2, 0], 0, start_rot_matrix[2, 2]]
+        ])
+        
+        # Create a rotation object from the y-axis rotation matrix
+        y_axis_rotation = R.from_matrix(y_axis_rotation_matrix)
+        
+        # Apply the y-axis rotation to the target quaternion
+        adjusted_target_rot = y_axis_rotation * target_rot
+        
+        # Convert the result back to quaternion format
+        adjusted_target_quat = adjusted_target_rot.as_quat()
+
+        return adjusted_target_quat
     
     def minimize_angle_change(self, start_angle, end_angle):
         """
@@ -178,7 +212,13 @@ class LoadRobot:
                 # Ensure the joint value stays within [-2pi, 2pi]
                 interpolated_configs[i, j] = np.clip(interpolated_value, self.lower_limits[j], self.upper_limits[j])
 
-        return interpolated_configs
+        # Check for collisions in the interpolated paths
+        collision_in_path = False
+        for config in interpolated_configs:
+            if self.check_self_collision(config):
+                collision_in_path = True
+
+        return interpolated_configs, collision_in_path
     
     def clip_joint_vals(self, joint_config):
         joint_config = np.array(joint_config)
@@ -249,20 +289,6 @@ class LoadRobot:
         for i in range(steps - transition_steps, steps - 1):
             alpha = (i - (steps - transition_steps)) / transition_steps
             joint_traj[i, :] = (1 - alpha) * joint_traj[i, :] + alpha * joint_traj[-1, :]
-
-        # smoothed_traj = np.copy(joint_traj)
-
-        # # Calculate the difference between consecutive joint configurations
-        # differences = np.abs(np.diff(joint_traj, axis=0))
-        
-        # # Find indices where the difference exceeds the max_jump threshold
-        # exceeding_indices = np.argwhere(differences > max_jump)
-        
-        # # Adjust indices to reflect the original joint_traj array
-        # for i, j in exceeding_indices:
-        #     if i < steps - 2:  # Ensure we do not exceed bounds
-        #         # Replace the next value with the average of the previous and the following value
-        #         smoothed_traj[i + 1, j] = (smoothed_traj[i, j] + smoothed_traj[i + 2, j]) / 2
 
         return joint_traj
     
@@ -339,7 +365,7 @@ class LoadRobot:
 
         return trajectory
   
-    def cubic_interp_path(self, start_positions, end_positions, steps=100, limit_joints=True):
+    def cubic_interp_path(self, start_positions, end_positions, steps=100):
         """Interpolate joint positions using cubic splines between start and end configurations.
 
         Args:
@@ -354,16 +380,28 @@ class LoadRobot:
         num_joints = len(start_positions)
         t = np.linspace(0, 1, steps)
 
-        if limit_joints:
-            start_positions = self.clip_joint_vals(start_positions)
-            end_positions = self.clip_joint_vals(end_positions)
+        # Adjust end angles to minimize angle change
+        adjusted_end_positions = [self.minimize_angle_change(start_positions[i], end_positions[i]) for i in range(num_joints)]
 
         interpolated_joint_angles = []
         for i in range(num_joints):
-            cs = CubicSpline([0, 1], [start_positions[i], end_positions[i]], bc_type='clamped')
-            interpolated_joint_angles.append(cs(t))
+            cs = CubicSpline([0, 1], [start_positions[i], adjusted_end_positions[i]], bc_type='clamped')
+            # interpolated_joint_angles.append(cs(t))
+            joint_angles = cs(t)
 
-        return [tuple(p) for p in zip(*interpolated_joint_angles)]
+            # Clip the interpolated values to stay within joint limits [-2pi, 2pi]
+            joint_angles_clipped = np.clip(joint_angles, self.lower_limits[i], self.upper_limits[i])
+            interpolated_joint_angles.append(joint_angles_clipped)
+
+        path = [tuple(p) for p in zip(*interpolated_joint_angles)]
+ 
+        # Check for collisions in the interpolated paths
+        collision_in_path = False
+        for config in path:
+            if self.check_self_collision(config):
+                collision_in_path = True
+
+        return path, collision_in_path
     
     def sample_path_to_length(self, path, desired_length):
         """ Takes a joint trajectory path of any length and interpolates to a desired array length
