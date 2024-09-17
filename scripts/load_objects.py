@@ -44,10 +44,10 @@ class LoadObjects:
         self.prune_point_2_pos = [self.start_x, self.start_y + 0.05, 0.55] 
         self.radius = 0.05 
 
-        self.leader_branchId = self.load_urdf("./urdf/leader_branch.urdf", [0, self.start_y, 1.6/2])
-        self.top_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, self.start_y, 1.5], [0, np.pi / 2, 0])
-        self.mid_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, self.start_y, 1], [0, np.pi / 2, 0])
-        self.bottom_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, self.start_y, 0.5], [0, np.pi / 2, 0])
+        # self.leader_branchId = self.load_urdf("./urdf/leader_branch.urdf", [0, self.start_y, 1.6/2])
+        # self.top_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, self.start_y, 1.5], [0, np.pi / 2, 0])
+        # self.mid_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, self.start_y, 1], [0, np.pi / 2, 0])
+        # self.bottom_branchId = self.load_urdf("./urdf/secondary_branch.urdf", [0, self.start_y, 0.5], [0, np.pi / 2, 0])
         # self.collision_objects = [self.leader_branchId, self.top_branchId, self.mid_branchId, self.bottom_branchId, self.planeId]
         self.collision_objects = [self.planeId]
 

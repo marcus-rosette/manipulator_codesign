@@ -39,7 +39,7 @@ class LoadRobot:
         self.robotId = self.con.loadURDF(self.robot_urdf_path, self.start_pos, self.start_orientation, useFixedBase=True, flags=flags)
         self.num_joints = self.con.getNumJoints(self.robotId)
 
-        self.end_effector_index = self.num_joints - 3
+        self.end_effector_index = self.num_joints - 2
         print(f'\nSelected end-effector index info: {self.con.getJointInfo(self.robotId, self.end_effector_index)[:2]}')
 
         self.controllable_joint_idx = [

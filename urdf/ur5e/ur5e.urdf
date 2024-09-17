@@ -304,10 +304,10 @@
     <child link="tool0" />
   </joint>
 
-  <joint name="ee_probe_joint" type="fixed">
-    <parent link="ee_link" />
+  <joint name="gripper_joint" type="fixed">
+    <parent link="tool0" />
     <child link="gripper_link" />
-    <origin xyz="0.21 0 0" rpy="0 1.57 0" />
+    <origin xyz="0 0 0.215" rpy="0 0 0" />
   </joint>
 
   <link name="gripper_link">
@@ -323,15 +323,6 @@
         <box size="0.06 0.06 0.2" />
       </geometry>
     </visual>
-  </link>
-
-  <joint name="ee_probe_tip_joint" type="fixed">
-    <parent link="gripper_link" />
-    <child link="ee_probe_tip" />
-    <origin xyz="-0.02 0 0" rpy="0 0 0" />
-  </joint>
-
-  <link name="ee_probe_tip">
   </link>
 
   <link name="world" />

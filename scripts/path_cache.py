@@ -21,7 +21,6 @@ class PathCache:
         self.robot_home_pos = robot_home_pos
         self.robot = LoadRobot(self.pyb.con, robot_urdf_path, [0, 0, 0], self.pyb.con.getQuaternionFromEuler([0, 0, 0]), self.robot_home_pos, collision_objects=self.object_loader.collision_objects)
         
-        self.robot.reset_joint_positions(self.robot_home_pos)
         start_position, start_orientation = self.robot.get_link_state(self.robot.end_effector_index)
         self.start_pose = np.concatenate((start_position, start_orientation))
 
@@ -127,7 +126,6 @@ if __name__ == "__main__":
     render = False
     robot_home_pos = [np.pi/2, -3*np.pi/4, np.pi/2, -3*np.pi/4, -np.pi/2, 0]
     # robot_home_pos = [0, -np.pi/2, 0, -np.pi/2, 0, 0]
-    # robot_home_pos = [0, 0, 0, 0, 0, 0]
     path_cache = PathCache(robot_urdf_path="./urdf/ur5e/ur5e.urdf", renders=render, robot_home_pos=robot_home_pos)
 
     num_hemisphere_points = [8, 8] # [num_theta, num_phi]
@@ -136,19 +134,19 @@ if __name__ == "__main__":
 
     voxel_data = np.loadtxt('./data/voxel_data_parallelepiped.csv')
     voxel_centers = voxel_data[:, :3]
-    voxel_indices = voxel_data[:, 3:]
+    # voxel_indices = voxel_data[:, 3:]
 
     # Translate voxels in front of robot
-    y_trans = 0.75
+    y_trans = 0.65
     voxel_centers_shifted = np.copy(voxel_centers)
     voxel_centers_shifted[:, 1] += y_trans
-    voxel_centers = voxel_centers_shifted
+    # voxel_centers = voxel_centers_shifted
 
     num_configs_in_path = 100
-    save_data_filename = './data/voxel_ik_solutions_parallelepiped.csv'
-    path_filename = './data/task_space_linear_interp_paths'
+    save_data_filename = './data/voxel_ik_data.csv'
+    path_filename = './data/reachable_paths'
     
-    nan_mask = path_cache.find_high_manip_ik(voxel_centers, 
+    nan_mask = path_cache.find_high_manip_ik(voxel_centers_shifted, 
                                              num_hemisphere_points, 
                                              look_at_point_offset, 
                                              hemisphere_radius, 
@@ -157,9 +155,9 @@ if __name__ == "__main__":
                                              path_filename=path_filename)
 
     # Filtered voxel_data
-    voxel_data_filtered = voxel_centers[nan_mask]
+    voxel_data_filtered = voxel_centers_shifted[nan_mask]
     print(voxel_data_filtered.shape)
-    filename = './data/task_space_filtered_voxels_centers.csv'
+    filename = './data/reachable_voxels_centers.csv'
     np.savetxt(filename, voxel_data_filtered)
 
     filename2 = '/home/marcus/apple_harvest_ws/src/apple-harvest/harvest_control/resource/reachable_voxel_centers.csv'
