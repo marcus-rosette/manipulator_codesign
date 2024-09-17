@@ -206,17 +206,14 @@ class LoadRobot:
             
             # Interpolate linearly between the start and adjusted end angles
             for i in range(num_steps):
-                alpha = i / (num_steps - 1)  # Interpolation factor between 0 and 1
-                interpolated_value = (1 - alpha) * start_config[j] + alpha * adjusted_end
+                # Generate the interpolated joint positions for the current joint
+                interpolated_configs[:, j] = np.linspace(start_config[j], adjusted_end, num_steps)
 
                 # Ensure the joint value stays within [-2pi, 2pi]
-                interpolated_configs[i, j] = np.clip(interpolated_value, self.lower_limits[j], self.upper_limits[j])
+                interpolated_configs[:, j] = np.clip(interpolated_configs[:, j], self.lower_limits[j], self.upper_limits[j])
 
-        # Check for collisions in the interpolated paths
-        collision_in_path = False
-        for config in interpolated_configs:
-            if self.check_self_collision(config):
-                collision_in_path = True
+        # Check for collisions in the interpolated path
+        collision_in_path = any(self.check_self_collision(config) for config in interpolated_configs)
 
         return interpolated_configs, collision_in_path
     

@@ -75,8 +75,9 @@ class PathCache:
                 ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
 
                 # If the target joint anlges result in a collisions, skip the iteration
-                collision_bool = self.robot.check_collision_aabb(self.robot.robotId, self.object_loader.planeId)
-                if collision_bool:
+                ground_collision = self.robot.check_collision_aabb(self.robot.robotId, self.object_loader.planeId)
+                # vtrellis_tree_collision = self.robot.check_collision_aabb(self.robot.robotId, self.object_loader.vtrellis_treeId)
+                if ground_collision: # or vtrellis_tree_collision:
                     continue
 
                 # If the distance between the desired point and found ik solution ee-point is greater than the tol, then skip the iteration
