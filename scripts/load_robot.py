@@ -74,7 +74,7 @@ class LoadRobot:
         for config in joint_path:
             self.con.setJointMotorControlArray(self.robotId, self.controllable_joint_idx, self.con.POSITION_CONTROL, targetPositions=config)
             self.con.stepSimulation()
-            time.sleep(1/100)
+            time.sleep(1/25)
 
     def get_joint_positions(self):
         return [self.con.getJointState(self.robotId, i)[0] for i in self.controllable_joint_idx]
@@ -163,21 +163,36 @@ class LoadRobot:
 
         return adjusted_target_quat
     
-    def minimize_angle_change(self, start_angle, end_angle):
+    # def minimize_angle_change(self, start_angle, end_angle):
+    #     """
+    #     Finds the shortest path between start_angle and end_angle, considering
+    #     the wrapping behavior of angles within [-2pi, 2pi].
+
+    #     Parameters:
+    #     - start_angle: float, the starting joint angle
+    #     - end_angle: float, the desired final joint angle
+
+    #     Returns:
+    #     - adjusted_end_angle: float, the adjusted end_angle to minimize the movement
+    #     """
+    #     # Normalize the angles to the range [-pi, pi]
+    #     delta = (end_angle - start_angle + np.pi) % (2 * np.pi) - np.pi
+    #     # return start_angle + delta
+    #     return delta
+
+    def normalize_joint_angles(self, joint_angles):
         """
-        Finds the shortest path between start_angle and end_angle, considering
-        the wrapping behavior of angles within [-2pi, 2pi].
+        Normalize a list of joint angles to stay within [-pi, pi].
 
         Parameters:
-        - start_angle: float, the starting joint angle
-        - end_angle: float, the desired final joint angle
+        - joint_angles: list or numpy array of joint angles
 
         Returns:
-        - adjusted_end_angle: float, the adjusted end_angle to minimize the movement
+        - normalized_angles: numpy array of joint angles normalized to [-pi, pi]
         """
-        # Normalize the angles to the range [-pi, pi]
-        delta = (end_angle - start_angle + np.pi) % (2 * np.pi) - np.pi
-        return start_angle + delta
+        # Normalize each angle to the range [-pi, pi]
+        normalized_angles = (joint_angles + np.pi) % (2 * np.pi) - np.pi
+        return normalized_angles
     
     def interpolate_joint_positions(self, start_config, end_config, num_steps):
         """
@@ -192,31 +207,74 @@ class LoadRobot:
         Returns:
         - interpolated_configs: numpy array of shape (num_steps, n), interpolated joint positions
         """
-
+        
         start_config = np.array(start_config)
         end_config = np.array(end_config)
+
+        # start_config = self.normalize_joint_angles(start_config)
+        # end_config = self.normalize_joint_angles(end_config)
+
+        if np.abs(np.any(start_config)) > np.pi or np.abs(np.any(end_config)) > np.pi:
+            print('danger')
 
         # Create an array for the interpolated configurations
         interpolated_configs = np.zeros((num_steps, len(start_config)))
 
         # Loop over each joint to interpolate using minimal angular changes
         for j in range(len(start_config)):
-            # Adjust end angle to minimize the angular movement
-            adjusted_end = self.minimize_angle_change(start_config[j], end_config[j])
-            
             # Interpolate linearly between the start and adjusted end angles
             for i in range(num_steps):
-                # Generate the interpolated joint positions for the current joint
-                interpolated_configs[:, j] = np.linspace(start_config[j], adjusted_end, num_steps)
-
-                # Ensure the joint value stays within [-2pi, 2pi]
-                interpolated_configs[:, j] = np.clip(interpolated_configs[:, j], self.lower_limits[j], self.upper_limits[j])
+                interpolated_value = np.linspace(start_config[j], end_config[j], num_steps)[i]
+                
+                # Ensure the joint value stays within [-2pi, 2pi] after interpolation
+                interpolated_value = np.clip(interpolated_value, self.lower_limits[j], self.upper_limits[j])
+                
+                # Store the interpolated value in the array
+                interpolated_configs[i, j] = interpolated_value
 
         # Check for collisions in the interpolated path
         collision_in_path = any(self.check_self_collision(config) for config in interpolated_configs)
 
         return interpolated_configs, collision_in_path
-    
+
+    def peck_traj_gen(self, start_config, start_pose, end_config, end_pose, retract_distance, num_steps):
+        start_position = start_pose[:3]
+        start_orientation = start_pose[3:]
+
+        end_position = end_pose[:3]
+        end_orientation = end_pose[3:]
+
+        mid_position = (start_position + end_position) / 2
+        mid_position[1] -= retract_distance
+
+        rotations = R.from_quat([start_orientation, end_orientation])
+
+        # Define key times (e.g., t=0 for start, t=1 for end)
+        times = np.array([0, 1])
+
+        # Create SLERP object with two rotations
+        slerp = Slerp(times, rotations)
+
+        # Interpolate at t = 0.5 (midpoint)
+        mid_rotation = slerp(0.5)
+
+        # Get the quaternion for the mid rotation
+        mid_orientation = mid_rotation.as_quat()
+
+        mid_config = self.inverse_kinematics(mid_position, mid_orientation, rest_config=list(end_config))
+
+        first_half_traj, path_collision1 = self.interpolate_joint_positions(start_config, mid_config, int(num_steps/2))
+        second_half_traj, path_collision2 = self.interpolate_joint_positions(mid_config, end_config, int(num_steps/2))
+
+        traj = np.vstack((first_half_traj, second_half_traj))
+
+        if path_collision1 or path_collision2:
+            collision = True
+        else:
+            collision = False
+
+        return traj, collision
+
     def clip_joint_vals(self, joint_config):
         joint_config = np.array(joint_config)
 

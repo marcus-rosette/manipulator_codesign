@@ -18,12 +18,12 @@ class AlignHemisphere:
     def __init__(self, robot_urdf_path, robot_home_pos, renders: bool) -> None:
         self.pyb = PybUtils(self, renders=renders)
         self.object_loader = LoadObjects(self.pyb.con)
-        self.robot = LoadRobot(self.pyb.con, robot_urdf_path, [0.6, 0.2, 0], self.pyb.con.getQuaternionFromEuler([0, 0, 0]), robot_home_pos)
+        self.robot = LoadRobot(self.pyb.con, robot_urdf_path, [0, 0, 0], self.pyb.con.getQuaternionFromEuler([0, 0, 0]), robot_home_pos)
 
     def test(self):
         # Target position and orientation for the end-effector
-        # look_at_point = [0, 0.8, 1.2]    # Point where the end-effector should face
-        look_at_point = self.object_loader.prune_point_1_pos
+        look_at_point = [0.7, 0.7, 0.6]    # Point where the end-effector should face
+        # look_at_point = self.object_loader.prune_point_1_pos
         look_at_point_offset = 0.0
         num_points = [25, 25]
 
@@ -31,7 +31,7 @@ class AlignHemisphere:
         # look_at_sphere = self.pyb.con.loadURDF("sphere2.urdf", look_at_point, globalScaling=0.05, useFixedBase=True)
         # self.pyb.con.changeVisualShape(look_at_sphere, -1, rgbaColor=[0, 1, 0, 1]) 
 
-        hemisphere_pts = sample_hemisphere_suface_pts(look_at_point, look_at_point_offset, 0.1, num_points)
+        hemisphere_pts = sample_hemisphere_suface_pts(look_at_point, look_at_point_offset, 0.25, num_points)
         hemisphere_oris = hemisphere_orientations(look_at_point, hemisphere_pts)
 
         # Iterate through position and orientation pairs
@@ -115,6 +115,6 @@ class AlignHemisphere:
 if __name__ == '__main__':
     render = True
     robot_home_pos = [0, -np.pi/2, 0, -np.pi/2, 0, 0]
-    path_cache = AlignHemisphere(robot_urdf_path="./urdf/ur5e/ur5e_cart.urdf", robot_home_pos=robot_home_pos, renders=render)
+    path_cache = AlignHemisphere(robot_urdf_path="./urdf/ur5e/ur5e.urdf", robot_home_pos=robot_home_pos, renders=render)
 
     path_cache.test()

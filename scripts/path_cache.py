@@ -73,6 +73,7 @@ class PathCache:
 
                 self.robot.reset_joint_positions(joint_angles)
                 ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
+                ee_pose = np.concatenate((ee_pos, ee_ori))
 
                 # If the target joint anlges result in a collisions, skip the iteration
                 ground_collision = self.robot.check_collision_aabb(self.robot.robotId, self.object_loader.planeId)
@@ -89,7 +90,12 @@ class PathCache:
                 
                 if manipulability > best_manipulability:
                     # Interpolate a path from the starting configuration to the best IK solution
-                    path, collision_in_path = self.robot.interpolate_joint_positions(self.robot_home_pos, joint_angles, num_configs_in_path)
+                    # path, collision_in_path = self.robot.interpolate_joint_positions(self.robot_home_pos, joint_angles, num_configs_in_path)
+
+                    # Set the retract_distance to the same value as the start y pos
+                    retract_distance = (self.start_pose[1] + ee_pose[1]) / 2
+                    path, collision_in_path = self.robot.peck_traj_gen(self.robot_home_pos, self.start_pose, joint_angles, ee_pose, retract_distance, num_configs_in_path)
+
                     if not collision_in_path:
                         best_path = path
                         best_ik = joint_angles
@@ -115,6 +121,8 @@ class PathCache:
             # Save end effector solutions
             np.savetxt(save_data_filename, end_effector_solu_cleaned, delimiter=",", header="j1,j2,j3,j4,j5,j6,end_effector_x,end_effector_y,end_effector_z,quat_x,quat_y,quat_z,quat_w,manipulability", comments='')
 
+            np.savetxt('/home/marcus/apple_harvest_ws/src/apple-harvest/harvest_control/resource/voxel_ik_data.csv', end_effector_solu_cleaned, delimiter=",", header="j1,j2,j3,j4,j5,j6,end_effector_x,end_effector_y,end_effector_z,quat_x,quat_y,quat_z,quat_w,manipulability", comments='')
+
             # Save associated paths as a .npy file
             np.save(path_filename, best_paths_cleaned)
 
@@ -125,11 +133,11 @@ class PathCache:
             
 if __name__ == "__main__":
     render = False
-    robot_home_pos = [np.pi/2, -3*np.pi/4, np.pi/2, -3*np.pi/4, -np.pi/2, 0]
+    robot_home_pos = [- 3 * np.pi/2, -3*np.pi/4, np.pi/2, -3*np.pi/4, -np.pi/2, 0]
     # robot_home_pos = [0, -np.pi/2, 0, -np.pi/2, 0, 0]
     path_cache = PathCache(robot_urdf_path="./urdf/ur5e/ur5e.urdf", renders=render, robot_home_pos=robot_home_pos)
 
-    num_hemisphere_points = [8, 8] # [num_theta, num_phi]
+    num_hemisphere_points = [25, 25] # [num_theta, num_phi]
     look_at_point_offset = 0.0
     hemisphere_radius = 0.15
 
