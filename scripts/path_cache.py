@@ -1,6 +1,4 @@
 import numpy as np
-from scipy.spatial.transform import Rotation as R
-import time
 from pyb_utils import PybUtils
 from load_objects import LoadObjects
 from load_robot import LoadRobot
@@ -8,7 +6,7 @@ from sample_approach_points import sample_hemisphere_suface_pts, hemisphere_orie
 
 
 class PathCache:
-    def __init__(self, robot_urdf_path: str, robot_home_pos, ik_tol=0.15, renders=True):
+    def __init__(self, robot_urdf_path: str, robot_home_pos, ik_tol=0.05, renders=True):
         """ Generate a cache of paths to high scored manipulability configurations
 
         Args:
@@ -66,19 +64,15 @@ class PathCache:
 
             # Get IK solution for each target point on hemisphere and save the one with the highest manipulability 
             for target_position, target_orientation in zip(hemisphere_pts, hemisphere_oris):
-                # target_orientation = self.robot.limit_quaternion_y_rot(self.start_pose[3:], target_orientation)
-
-                # joint_angles = self.robot.inverse_kinematics(target_position, adjusted_target_quat)
                 joint_angles = self.robot.inverse_kinematics(target_position, target_orientation)
 
                 self.robot.reset_joint_positions(joint_angles)
                 ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
                 ee_pose = np.concatenate((ee_pos, ee_ori))
 
-                # If the target joint anlges result in a collisions, skip the iteration
+                # If the target joint angles result in a collision with the ground plane, skip the iteration
                 ground_collision = self.robot.check_collision_aabb(self.robot.robotId, self.object_loader.planeId)
-                # vtrellis_tree_collision = self.robot.check_collision_aabb(self.robot.robotId, self.object_loader.vtrellis_treeId)
-                if ground_collision: # or vtrellis_tree_collision:
+                if ground_collision:
                     continue
 
                 # If the distance between the desired point and found ik solution ee-point is greater than the tol, then skip the iteration
@@ -86,22 +80,19 @@ class PathCache:
                 if distance > self.ik_tol:
                     continue
 
+                # Interpolate a joint trajectory between the robot home position and the desired target configuration
+                path, collision_in_path = self.robot.interpolate_joint_trajectory(robot_home_pos, joint_angles, num_steps=num_configs_in_path)
+                if collision_in_path:
+                    continue
+
                 manipulability = self.robot.calculate_manipulability(joint_angles, planar=False, visualize_jacobian=False)
                 
                 if manipulability > best_manipulability:
-                    # Interpolate a path from the starting configuration to the best IK solution
-                    # path, collision_in_path = self.robot.interpolate_joint_positions(self.robot_home_pos, joint_angles, num_configs_in_path)
-
-                    # Set the retract_distance to the same value as the start y pos
-                    retract_distance = (self.start_pose[1] + ee_pose[1]) / 2
-                    path, collision_in_path = self.robot.peck_traj_gen(self.robot_home_pos, self.start_pose, joint_angles, ee_pose, retract_distance, num_configs_in_path)
-
-                    if not collision_in_path:
-                        best_path = path
-                        best_ik = joint_angles
-                        best_ee_pos = target_position
-                        best_orienation = target_orientation
-                        best_manipulability = manipulability
+                    best_path = path
+                    best_ik = joint_angles
+                    best_ee_pos = target_position
+                    best_orienation = target_orientation
+                    best_manipulability = manipulability
 
             best_iks[i, :] = best_ik
             best_ee_positions[i, :] = best_ee_pos
@@ -133,23 +124,20 @@ class PathCache:
             
 if __name__ == "__main__":
     render = False
-    robot_home_pos = [- 3 * np.pi/2, -3*np.pi/4, np.pi/2, -3*np.pi/4, -np.pi/2, 0]
-    # robot_home_pos = [0, -np.pi/2, 0, -np.pi/2, 0, 0]
+    robot_home_pos = [np.pi/2, -np.pi/2, 2*np.pi/3, 5*np.pi/6, -np.pi/2, 0]
     path_cache = PathCache(robot_urdf_path="./urdf/ur5e/ur5e.urdf", renders=render, robot_home_pos=robot_home_pos)
 
-    num_hemisphere_points = [25, 25] # [num_theta, num_phi]
+    num_hemisphere_points = [10, 10]
     look_at_point_offset = 0.0
     hemisphere_radius = 0.15
 
     voxel_data = np.loadtxt('./data/voxel_data_parallelepiped.csv')
     voxel_centers = voxel_data[:, :3]
-    # voxel_indices = voxel_data[:, 3:]
 
     # Translate voxels in front of robot
-    y_trans = 0.65
+    y_trans = 0.9
     voxel_centers_shifted = np.copy(voxel_centers)
     voxel_centers_shifted[:, 1] += y_trans
-    # voxel_centers = voxel_centers_shifted
 
     num_configs_in_path = 100
     save_data_filename = './data/voxel_ik_data.csv'

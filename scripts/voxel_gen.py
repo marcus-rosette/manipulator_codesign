@@ -1,7 +1,7 @@
 import numpy as np
 import open3d as o3d
 from scipy.spatial.transform import Rotation as R
-from scipy.spatial import ConvexHull, Delaunay
+from scipy.spatial import ConvexHull
 
 
 def filter_isolated_points(point_cloud, distance_threshold=0.1):
@@ -260,11 +260,11 @@ if __name__ == '__main__':
     # filtered_pcd = load_pc_and_downsample(file_path, z_threshold, neighbor_threshold, voxel_size)
 
     # Define parameters for the parallelepiped
-    voxel_size = 0.05 # meters
-    vis = True
+    voxel_size = 0.1 # meters
+    vis = False
 
     # Define the dimensions of the parallelepiped
-    width, height, depth = 1.0, 1.2, 0.2  # 2width x 2height x 0.5D
+    width, height, depth = 1.0, 1.2, 0.3  # 2width x 2height x 0.5D
     theta = np.deg2rad(18.435) # Angle provided by Martin (WSU) 9/11/2024 
     # parallelepiped, vertices = parallelepiped_geometry(height, width, depth, theta)
     voxel_centers = generate_parallelepiped_voxels(height, width, depth, theta, voxel_size, pyb_trans=True)

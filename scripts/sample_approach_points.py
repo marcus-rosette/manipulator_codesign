@@ -99,6 +99,16 @@ def hemisphere_orientations(point1, points2):
     # Compute the quaternion for each direction vector
     for i, direction_vector in enumerate(direction_vectors):
         rotation = R.align_vectors([direction_vector], [reference_direction])[0]
+
+        # Convert the quaternion to Euler angles (roll, pitch, yaw)
+        euler_angles = rotation.as_euler('xyz')  # Get Euler angles in x-y-z order (roll, pitch, yaw)
+        
+        # Fix the roll angle to maintain the camera being upright
+        euler_angles[1] = 0  # Fix the roll (around y-axis)
+        
+        # Convert the modified Euler angles back to a quaternion
+        fixed_rotation = R.from_euler('xyz', euler_angles)
+
         quaternions[i] = rotation.as_quat()  # scipy returns in (x, y, z, w) order by default
     
     return quaternions

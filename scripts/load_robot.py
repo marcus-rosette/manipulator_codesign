@@ -1,7 +1,6 @@
 import numpy as np
 import time
-from scipy.interpolate import CubicSpline
-from scipy.spatial.transform import Slerp, Rotation
+from scipy.spatial.transform import Slerp
 from scipy.spatial.transform import Rotation as R
 from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
 
@@ -137,67 +136,69 @@ class LoadRobot:
                 )
         return joint_positions
     
-    def limit_quaternion_y_rot(self, start_quaternion, end_quaterion):
-        # Convert quaternions to scipy Rotation objects
-        start_rot = R.from_quat(start_quaternion)
-        target_rot = R.from_quat(end_quaterion)
-        
-        # Extract the rotation matrix from the starting quaternion
-        start_rot_matrix = start_rot.as_matrix()
-        
-        # Extract the y-axis rotation from the starting quaternion
-        y_axis_rotation_matrix = np.array([
-            [start_rot_matrix[0, 0], 0, start_rot_matrix[0, 2]],
-            [0, 1, 0],
-            [start_rot_matrix[2, 0], 0, start_rot_matrix[2, 2]]
-        ])
-        
-        # Create a rotation object from the y-axis rotation matrix
-        y_axis_rotation = R.from_matrix(y_axis_rotation_matrix)
-        
-        # Apply the y-axis rotation to the target quaternion
-        adjusted_target_rot = y_axis_rotation * target_rot
-        
-        # Convert the result back to quaternion format
-        adjusted_target_quat = adjusted_target_rot.as_quat()
-
-        return adjusted_target_quat
-    
-    # def minimize_angle_change(self, start_angle, end_angle):
-    #     """
-    #     Finds the shortest path between start_angle and end_angle, considering
-    #     the wrapping behavior of angles within [-2pi, 2pi].
-
-    #     Parameters:
-    #     - start_angle: float, the starting joint angle
-    #     - end_angle: float, the desired final joint angle
-
-    #     Returns:
-    #     - adjusted_end_angle: float, the adjusted end_angle to minimize the movement
-    #     """
-    #     # Normalize the angles to the range [-pi, pi]
-    #     delta = (end_angle - start_angle + np.pi) % (2 * np.pi) - np.pi
-    #     # return start_angle + delta
-    #     return delta
-
-    def normalize_joint_angles(self, joint_angles):
+    def minimize_angle_change(self, start_angle, end_angle):
         """
-        Normalize a list of joint angles to stay within [-pi, pi].
+        Finds the shortest path between start_angle and end_angle, considering
+        the wrapping behavior of angles within [-2pi, 2pi].
 
         Parameters:
-        - joint_angles: list or numpy array of joint angles
+        - start_angle: float, the starting joint angle
+        - end_angle: float, the desired final joint angle
 
         Returns:
-        - normalized_angles: numpy array of joint angles normalized to [-pi, pi]
+        - adjusted_end_angle: float, the adjusted end_angle to minimize the movement
         """
-        # Normalize each angle to the range [-pi, pi]
-        normalized_angles = (joint_angles + np.pi) % (2 * np.pi) - np.pi
-        return normalized_angles
-    
-    def interpolate_joint_positions(self, start_config, end_config, num_steps):
+        # Normalize the angles to the range [-pi, pi]
+        delta = (end_angle - start_angle + np.pi) % (2 * np.pi) - np.pi
+        # return start_angle + delta
+        return delta
+
+    def shortest_angular_distance(self, start_configuration, end_configuration):
         """
-        Interpolates joint positions from start_config to end_config ensuring
-        that joint values stay within [-2pi, 2pi] for each joint.
+        Calculate the shortest angular distance between start and end joint configurations.
+
+        Parameters:
+        - start_configuration: list or numpy array of initial joint angles
+        - end_configuration: list or numpy array of target joint angles
+
+        Returns:
+        - adjusted_end_configuration: numpy array of end joint angles modified to take the shortest angular distance to the start configuration
+        """
+        # Ensure inputs are numpy arrays for vectorized operations
+        start_configuration = np.array(start_configuration)
+        end_configuration = np.array(end_configuration)
+
+        # Normalize both configurations to [-pi, pi]
+        start_configuration = (start_configuration + np.pi) % (2 * np.pi) - np.pi
+        end_configuration = (end_configuration + np.pi) % (2 * np.pi) - np.pi
+
+        # Calculate the angular difference between start and end configurations
+        angular_difference = end_configuration - start_configuration
+
+        # Wrap the angular difference to be within [-pi, pi]
+        adjusted_difference = (angular_difference + np.pi) % (2 * np.pi) - np.pi
+
+        # Check both paths: (end - start) and (end - start - 2*pi)
+        adjusted_end_minus_2pi = end_configuration - 2 * np.pi
+        adjusted_end_plus_2pi = end_configuration + 2 * np.pi
+
+        # Compute all possible angular differences
+        diff_original = adjusted_difference
+        diff_minus_2pi = (adjusted_end_minus_2pi - start_configuration + np.pi) % (2 * np.pi) - np.pi
+        diff_plus_2pi = (adjusted_end_plus_2pi - start_configuration + np.pi) % (2 * np.pi) - np.pi
+
+        # Choose the smallest angular difference for each joint
+        shortest_difference = np.where(np.abs(diff_minus_2pi) < np.abs(diff_original), diff_minus_2pi, diff_original)
+        shortest_difference = np.where(np.abs(diff_plus_2pi) < np.abs(shortest_difference), diff_plus_2pi, shortest_difference)
+
+        # Adjust the end configuration based on the shortest angular difference
+        adjusted_end_configuration = start_configuration + shortest_difference
+
+        return adjusted_end_configuration
+
+    def interpolate_joint_trajectory(self, start_config, end_config, num_steps):
+        """
+        Interpolates a joint joint trajectory from start_config to end_config
 
         Parameters:
         - start_config: numpy array of shape (n,), start joint positions
@@ -211,11 +212,8 @@ class LoadRobot:
         start_config = np.array(start_config)
         end_config = np.array(end_config)
 
-        # start_config = self.normalize_joint_angles(start_config)
-        # end_config = self.normalize_joint_angles(end_config)
-
-        if np.abs(np.any(start_config)) > np.pi or np.abs(np.any(end_config)) > np.pi:
-            print('danger')
+        # Minimize angular rotation of the last two joints
+        end_config[4:] = self.shortest_angular_distance(start_config[4:], end_config[4:])
 
         # Create an array for the interpolated configurations
         interpolated_configs = np.zeros((num_steps, len(start_config)))
@@ -236,16 +234,80 @@ class LoadRobot:
         collision_in_path = any(self.check_self_collision(config) for config in interpolated_configs)
 
         return interpolated_configs, collision_in_path
+    
+    def interpolate_joint_trajectory2(self, start_config, end_config, num_steps):
+        """
+        Interpolates a joint trajectory from start_config to end_config ensuring but ensuring the base joint actuates first
 
-    def peck_traj_gen(self, start_config, start_pose, end_config, end_pose, retract_distance, num_steps):
+        Parameters:
+        - start_config: numpy array of shape (n,), start joint positions
+        - end_config: numpy array of shape (n,), end joint positions
+        - num_steps: int, number of interpolation steps
+
+        Returns:
+        - interpolated_configs: numpy array of shape (num_steps, n), interpolated joint positions
+        """
+        
+        start_config = np.array(start_config)
+        end_config = np.array(end_config)
+
+        # Minimize angular rotation of the last two joints
+        end_config[4:] = self.shortest_angular_distance(start_config[4:], end_config[4:])
+
+        # Create an array for the interpolated configurations
+        interpolated_configs = np.zeros((num_steps, len(start_config)))
+
+        # Calculate the number of steps for the first joint (5%)
+        first_joint_steps = int(num_steps * 0.3)
+        
+        # Interpolation for the first joint
+        for i in range(first_joint_steps):
+            interpolated_value = np.linspace(start_config[0], end_config[0], first_joint_steps)[i]
+            interpolated_value = np.clip(interpolated_value, self.lower_limits[0], self.upper_limits[0])
+            interpolated_configs[i, 0] = interpolated_value
+
+        # Set remaining positions for the other joints
+        for j in range(1, len(start_config)):
+            # Interpolate linearly between the start and adjusted end angles for other joints
+            for i in range(num_steps - first_joint_steps):
+                interpolated_value = np.linspace(start_config[j], end_config[j], num_steps)[i]
+                interpolated_value = np.clip(interpolated_value, self.lower_limits[j], self.upper_limits[j])
+                interpolated_configs[i + first_joint_steps, j] = interpolated_value
+
+        # Ensure the first positions of other joints remain the same
+        for i in range(first_joint_steps):
+            interpolated_configs[i, 1:] = start_config[1:]
+
+        interpolated_configs[first_joint_steps:, 0] = interpolated_configs[first_joint_steps - 1, 0]
+
+        # Check for collisions in the interpolated path
+        collision_in_path = any(self.check_self_collision(config) for config in interpolated_configs)
+
+        return interpolated_configs, collision_in_path
+
+    def peck_traj_gen(self, start_config, start_pose, end_config, end_pose, num_steps):
+        """ Interpolates a joint trajectory between a start and end joint configuration, but also has the end effectory pass through a point that 
+        is between the start and end effector position and orientation, while keeping the depth (y) at the same position as the start position.
+
+        Args:
+            start_config (np.array): starting joint coinfiguration
+            start_pose (np.array): starting end effector pose [x, y, z, rz, ry, rz, w]
+            end_config (np.array): ending joint coinfiguration
+            end_pose (np.array): ending end effector pose [x, y, z, rz, ry, rz, w]
+            num_steps (int): number of joint configurations in trajectory
+
+        Returns:
+            traj (np.array): joint trajectory
+            collision (bool): describes any collisions in the trajectory
+        """
         start_position = start_pose[:3]
         start_orientation = start_pose[3:]
 
         end_position = end_pose[:3]
         end_orientation = end_pose[3:]
 
-        mid_position = (start_position + end_position) / 2
-        mid_position[1] -= retract_distance
+        mid_position = np.copy(end_position)
+        mid_position[1] = start_position[1]
 
         rotations = R.from_quat([start_orientation, end_orientation])
 
@@ -261,10 +323,14 @@ class LoadRobot:
         # Get the quaternion for the mid rotation
         mid_orientation = mid_rotation.as_quat()
 
-        mid_config = self.inverse_kinematics(mid_position, mid_orientation, rest_config=list(end_config))
+        test_rest_ee_pos = (start_position + mid_position) / 2 
+        test_rest_config = self.inverse_kinematics(test_rest_ee_pos, mid_orientation, rest_config=list(start_config))
+        test_rest_config[4:] = self.shortest_angular_distance(start_config[4:], end_config[4:])
 
-        first_half_traj, path_collision1 = self.interpolate_joint_positions(start_config, mid_config, int(num_steps/2))
-        second_half_traj, path_collision2 = self.interpolate_joint_positions(mid_config, end_config, int(num_steps/2))
+        mid_config = self.inverse_kinematics(mid_position, mid_orientation, rest_config=list(test_rest_config))
+
+        first_half_traj, path_collision1 = self.interpolate_joint_trajectory(start_config, mid_config, int(num_steps/2))
+        second_half_traj, path_collision2 = self.interpolate_joint_trajectory(first_half_traj[-1], end_config, int(num_steps/2))
 
         traj = np.vstack((first_half_traj, second_half_traj))
 
@@ -274,190 +340,167 @@ class LoadRobot:
             collision = False
 
         return traj, collision
-
-    def clip_joint_vals(self, joint_config):
-        joint_config = np.array(joint_config)
-
-        limit = 3.0
-
-        # Add 2pi to values less than -2pi
-        joint_config = np.where(joint_config < -limit, joint_config + 2 * np.pi, joint_config)
-
-        # Subtract 2pi from values greater than 2pi
-        joint_config = np.where(joint_config > limit, joint_config - 2 * np.pi, joint_config)
-
-        return joint_config
     
-    def linear_interp_path(self, start_positions, end_positions, steps=100, limit_joints=True):
-        """ Interpolate linear joint positions between a start and end configuration
+    def peck_traj_gen2(self, start_config, start_pose, end_config, end_pose, num_steps):
+        """ Interpolates a joint trajectory between a start and end joint configuration, but also has the end effectory pass through multiple points 
+        that are between the start and end effector position and orientation, while keeping the depth (y) at the same position as the start position.
 
         Args:
-            end_positions (float list): end joint configuration
-            start_positions (float list, optional): start joint configuration
-            steps (int, optional): number of interpolated positions. Defaults to 100.
-            limit_joints (bool, optional): whether or not to clip the joints to the closest revolute equivalent
+            start_config (np.array): starting joint coinfiguration
+            start_pose (np.array): starting end effector pose [x, y, z, rz, ry, rz, w]
+            end_config (np.array): ending joint coinfiguration
+            end_pose (np.array): ending end effector pose [x, y, z, rz, ry, rz, w]
+            num_steps (int): number of joint configurations in trajectory
 
         Returns:
-            list of tuple: interpolated joint positions
+            traj (np.array): joint trajectory
+            collision (bool): describes any collisions in the trajectory
         """
-        if limit_joints:
-            start_positions = self.clip_joint_vals(start_positions)
-            end_positions = self.clip_joint_vals(end_positions)
+        start_position = start_pose[:3]
+        start_orientation = start_pose[3:]
 
-        # Interpolate each joint individually
-        interpolated_joint_angles = [np.linspace(start, end, steps) for start, end in zip(start_positions, end_positions)]
+        end_position = end_pose[:3]
+        end_orientation = end_pose[3:]
 
-        # Extract each joint angle to a combined configuration
-        return np.array([tuple(p) for p in zip(*interpolated_joint_angles)])
+        mid_position = np.copy(end_position)
+        mid_position[1] = start_position[1]
+
+        num_midpoints = 3
+        mid_positions = np.linspace(start_position, mid_position, num_midpoints + 2)
+        # mid_positions = np.linspace(start_position, end_position, num_midpoints + 2)
+        mid_positions[:, 1] = start_position[1]
+
+        rotations = R.from_quat([start_orientation, end_orientation])
+
+        # Define key times (e.g., t=0 for start, t=1 for end)
+        times = np.array([0, 1])
+
+        # Create SLERP object with two rotations
+        slerp = Slerp(times, rotations)
+
+        # Interpolate at t = 0.5 (midpoint)
+        mid_rotation0 = slerp(0.25)
+        mid_rotation1 = slerp(0.5)
+        mid_rotation2 = slerp(0.75)
+
+        # Get the quaternion for the mid rotation
+        mid_orientation0 = mid_rotation0.as_quat()
+        mid_orientation1 = mid_rotation1.as_quat()
+        mid_orientation2 = mid_rotation2.as_quat()
+
+        mid_config0 = self.inverse_kinematics(mid_positions[1], mid_orientation0, rest_config=list(start_config))
+        first_traj, path_collision0 = self.interpolate_joint_trajectory(start_config, mid_config0, int(num_steps/6))
+
+        mid_config1 = self.inverse_kinematics(mid_positions[2], mid_orientation1, rest_config=list(first_traj[-1]))
+        second_traj, path_collision1 = self.interpolate_joint_trajectory(first_traj[-1], mid_config1, int(num_steps/6))
+
+        mid_config2 = self.inverse_kinematics(mid_positions[3], mid_orientation2, rest_config=list(second_traj[-1]))
+        third_traj, path_collision2 = self.interpolate_joint_trajectory(second_traj[-1], mid_config2, int(num_steps/6))
+
+        fourth_traj, path_collision3 = self.interpolate_joint_trajectory(third_traj[-1], end_config, int(num_steps/2))
+
+        traj = np.vstack((first_traj, second_traj, third_traj, fourth_traj))
+
+        if path_collision0 or path_collision1 or path_collision2 or path_collision3:
+            collision = True
+        else:
+            collision = False
+
+        return traj, collision
     
-    def task_space_path_interp(self, start_pose, end_pose, end_config, steps=100, max_jump=0.19):
-        # Interpolate each pose value individually
-        interpolated_poses = [np.linspace(start, end, steps) for start, end in zip(start_pose, end_pose)]
-
-        # Extract each value to a combined pose
-        poses = np.array([tuple(p) for p in zip(*interpolated_poses)])
-        
-        joint_traj = np.zeros((steps, len(self.controllable_joint_idx)))
-        joint_traj[0, :] = self.clip_joint_vals(self.home_config)
-        joint_traj[-1, :] = self.clip_joint_vals(end_config)
-
-        for i in range(1, joint_traj.shape[0] - 1):
-            point = poses[i, :3]        # Extract position
-            orientation = poses[i, 3:]  # Extract orientation
-
-            # Use the previous joint configuration as the seed (rest configuration) for IK
-            previous_joint_config = joint_traj[i-1, :]
-
-            # Compute the next joint configuration using inverse kinematics
-            ik_solution = self.inverse_kinematics(point, orientation, rest_config=list(previous_joint_config))
-            
-            # Clip the joint values to stay within joint limits
-            joint_traj[i, :] = self.clip_joint_vals(ik_solution)
-
-        # Smooth the transition from the start configuration
-        transition_steps = int(np.floor(steps * 0.4))
-        for i in range(1, transition_steps):
-            alpha = i / transition_steps
-            joint_traj[i, :] = (1 - alpha) * joint_traj[0, :] + alpha * joint_traj[i, :]
-
-        # Smooth the transition to the end configuration
-        for i in range(steps - transition_steps, steps - 1):
-            alpha = (i - (steps - transition_steps)) / transition_steps
-            joint_traj[i, :] = (1 - alpha) * joint_traj[i, :] + alpha * joint_traj[-1, :]
-
-        return joint_traj
-    
-    def task_and_joint_interp(self, start_pose, end_pose, end_config, steps=250):
-        start = self.clip_joint_vals(self.home_config)  # Start configuration
-        end = self.clip_joint_vals(end_config)  # End configuration
-
-        # Number of midpoints (excluding start and end)
-        num_midpoints = 25
-        poses = np.linspace(start_pose, end_pose, num_midpoints + 2)
-
-        # Initialize joint trajectory with zeros
-        joint_traj = np.zeros((num_midpoints + 2, 6))
-        
-        # Set start and end configurations
-        joint_traj[0, :] = start
-        joint_traj[-1, :] = end
-
-        # Populate joint trajectory using inverse kinematics
-        for i in range(1, joint_traj.shape[0] - 1):
-            point = poses[i, :3]        # Extract position
-            orientation = poses[i, 3:]  # Extract orientation
-
-            # Use the previous joint configuration as the seed (rest configuration) for IK
-            previous_joint_config = joint_traj[i - 1, :]
-
-            # Compute the next joint configuration using inverse kinematics
-            ik_solution = self.inverse_kinematics(point, orientation, rest_config=list(previous_joint_config))
-            
-            # Clip the joint values to stay within joint limits
-            joint_traj[i, :] = self.clip_joint_vals(ik_solution)
-        
-        # Total number of segments (between start, midpoints, and end)
-        num_segments = num_midpoints + 1
-
-        # Calculate base points per segment and the remainder
-        points_per_segment = (steps - 1) // num_segments  # -1 to account for the final step
-        remainder = (steps - 1) % num_segments  # Extra points to distribute
-
-        # List to hold interpolated segments
-        interpolated_segments = []
-
-        # Interpolation loop through all segments
-        for i in range(num_segments):
-            # Distribute remainder points evenly across some segments
-            segment_steps = points_per_segment + (1 if i < remainder else 0) + 1  # +1 to include endpoint
-            
-            # Interpolation factors for the current segment
-            t = np.linspace(0, 1, segment_steps)
-            
-            # Interpolate between current point and the next
-            interp_segment = np.outer(1 - t, joint_traj[i]) + np.outer(t, joint_traj[i + 1])
-            interpolated_segments.append(interp_segment)
-
-        # Stack all segments, avoiding duplicate points at segment boundaries
-        combined_points = np.vstack([seg if idx == 0 else seg[1:] for idx, seg in enumerate(interpolated_segments)])
-
-        # Clip joint values and return the combined points while preserving start and end
-        combined_points[0, :] = start  # Ensure the first point is the original start config
-        combined_points[-1, :] = end   # Ensure the last point is the original end config
-
-        trajectory = self.clip_joint_vals(combined_points)
-
-        # Smooth the transition from the start configuration
-        transition_steps = int(np.floor(steps * 0.4))
-        for i in range(1, transition_steps):
-            alpha = i / transition_steps
-            trajectory[i, :] = (1 - alpha) * trajectory[0, :] + alpha * trajectory[i, :]
-
-        # Smooth the transition to the end configuration
-        for i in range(steps - transition_steps, steps - 1):
-            alpha = (i - (steps - transition_steps)) / transition_steps
-            trajectory[i, :] = (1 - alpha) * trajectory[i, :] + alpha * trajectory[-1, :]
-
-        return trajectory
-  
-    def cubic_interp_path(self, start_positions, end_positions, steps=100):
-        """Interpolate joint positions using cubic splines between start and end configurations.
+    def task_space_path_interp(self, start_config, start_pose, end_config, end_pose, num_steps):
+        """ Interpolates a joint trajectory between a start and end joint configuration, where all intermediate configurations
+        are generated in task space while maintaining a desired start and end joint configuration.
 
         Args:
-            end_positions (float list): end joint configuration
-            start_positions (float list, optional): start joint configuration
-            steps (int, optional): number of interpolated positions. Defaults to 100.
-            limit_joints (bool, optional): whether or not to clip the joints to the closest revolute equivalent
+            start_config (np.array): starting joint coinfiguration
+            start_pose (np.array): starting end effector pose [x, y, z, rz, ry, rz, w]
+            end_config (np.array): ending joint coinfiguration
+            end_pose (np.array): ending end effector pose [x, y, z, rz, ry, rz, w]
+            num_steps (int): number of joint configurations in trajectory
 
         Returns:
-            list of tuple: interpolated joint positions
+            interpolated_configs (np.array): joint trajectory
+            collision_in_path (bool): describes any collisions in the trajectory
         """
-        num_joints = len(start_positions)
-        t = np.linspace(0, 1, steps)
+        start_position = start_pose[:3]
+        start_orientation = start_pose[3:]
 
-        # Adjust end angles to minimize angle change
-        adjusted_end_positions = [self.minimize_angle_change(start_positions[i], end_positions[i]) for i in range(num_joints)]
+        end_position = end_pose[:3]
+        end_orientation = end_pose[3:]
 
-        interpolated_joint_angles = []
-        for i in range(num_joints):
-            cs = CubicSpline([0, 1], [start_positions[i], adjusted_end_positions[i]], bc_type='clamped')
-            # interpolated_joint_angles.append(cs(t))
-            joint_angles = cs(t)
+        rotations = R.from_quat([start_orientation, end_orientation])
 
-            # Clip the interpolated values to stay within joint limits [-2pi, 2pi]
-            joint_angles_clipped = np.clip(joint_angles, self.lower_limits[i], self.upper_limits[i])
-            interpolated_joint_angles.append(joint_angles_clipped)
+        # Define key times (e.g., t=0 for start, t=1 for end)
+        times = np.array([0, 1])
 
-        path = [tuple(p) for p in zip(*interpolated_joint_angles)]
- 
-        # Check for collisions in the interpolated paths
-        collision_in_path = False
-        for config in path:
-            if self.check_self_collision(config):
-                collision_in_path = True
+        # Create SLERP object with two rotations
+        slerp = Slerp(times, rotations)
 
-        return path, collision_in_path
-    
+        # Split the number of steps for each phase
+        num_steps_phase1 = num_steps // 2  # First half for x and z translation
+        num_steps_phase2 = num_steps - num_steps_phase1  # Second half for y translation
+
+        # Create an empty array for storing interpolated joint configurations
+        interpolated_configs = np.zeros((num_steps, len(start_config)))
+        interpolated_configs[0] = start_config
+
+        # Phase 1: Interpolate x and z first, keep y constant
+        for i in range(1, num_steps_phase1):
+            # Interpolate x and z linearly between the start and end pose
+            interp_x = np.linspace(start_position[0], end_position[0], num_steps_phase1)[i]
+            interp_z = np.linspace(start_position[2], end_position[2], num_steps_phase1)[i]
+
+            # Keep y constant as the start y value
+            interp_y = start_position[1]
+
+            intermediate_position = np.array([interp_x, interp_y, interp_z])
+
+            # Interpolate orientation using SLERP
+            t = i / num_steps_phase1
+            intermediate_orientation = slerp(t).as_quat()  # Get interpolated orientation
+
+            # Create intermediate pose (x, y, z) + maintain original orientation
+            intermediate_pose = np.concatenate((intermediate_position, intermediate_orientation))
+
+            # Compute joint configuration for this pose using inverse kinematics
+            joint_config = self.inverse_kinematics(intermediate_position, intermediate_orientation, rest_config=list(interpolated_configs[i-1]))
+            joint_config = self.shortest_angular_distance(interpolated_configs[i-1], joint_config)
+
+            interpolated_configs[i] = joint_config
+
+        # Phase 2: Interpolate y while keeping x and z fixed at their final values
+        for i in range(num_steps_phase2):
+            # Interpolate y linearly between the intermediate y and end y
+            interp_y = np.linspace(start_position[1], end_position[1], num_steps_phase2)[i]
+
+            # Keep x and z fixed at their final values
+            interp_x = end_position[0]
+            interp_z = end_position[2]
+
+            # Create final pose (x, y, z) + final orientation
+            final_position = np.array([interp_x, interp_y, interp_z])
+            
+            # Interpolate orientation using SLERP
+            t = i / num_steps_phase2
+            intermediate_orientation = slerp(0.5 + 0.5 * t).as_quat()  # Interpolate for second phase
+
+            intermediate_pose = np.concatenate((final_position, intermediate_orientation))
+
+            # Compute joint configuration for this pose using inverse kinematics
+            joint_config = self.inverse_kinematics(final_position, intermediate_orientation, rest_config=list(interpolated_configs[i-1]))
+            joint_config = self.shortest_angular_distance(interpolated_configs[i-1], joint_config)
+            interpolated_configs[num_steps_phase1 + i] = joint_config
+        
+        # Force the last configuration to match end_config
+        interpolated_configs[-1] = end_config
+        interpolated_configs[-1] = self.shortest_angular_distance(interpolated_configs[-2], end_config)
+
+        # Check for collisions in the interpolated path
+        collision_in_path = any(self.check_self_collision(config) for config in interpolated_configs)
+
+        return interpolated_configs, collision_in_path
+
     def sample_path_to_length(self, path, desired_length):
         """ Takes a joint trajectory path of any length and interpolates to a desired array length
 
