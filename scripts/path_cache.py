@@ -86,7 +86,6 @@ class PathCache:
                     continue
 
                 manipulability = self.robot.calculate_manipulability(joint_angles, planar=False, visualize_jacobian=False)
-                
                 if manipulability > best_manipulability:
                     best_path = path
                     best_ik = joint_angles
