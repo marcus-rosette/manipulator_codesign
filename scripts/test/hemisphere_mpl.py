@@ -51,7 +51,7 @@ angles_from_y = np.arccos(np.abs((coordinates_unique[:, 1] - origin[1]) / radius
 angle_threshold = np.deg2rad(30)
 
 # Filter the coordinates based on the angle threshold
-filtered_coordinates = coordinates_unique[angles_from_y <= angle_threshold]
+filtered_coordinates = coordinates_unique[(angles_from_y <= angle_threshold)  & (coordinates_unique[:, 2] <= vertex[2])]
 
 # Extract the filtered x, y, z coordinates
 x_filtered = filtered_coordinates[:, 0]

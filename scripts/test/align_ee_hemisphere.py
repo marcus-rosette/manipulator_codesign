@@ -25,7 +25,7 @@ class AlignHemisphere:
         look_at_point = [0.7, 0.7, 0.6]    # Point where the end-effector should face
         # look_at_point = self.object_loader.prune_point_1_pos
         look_at_point_offset = 0.0
-        num_points = [25, 25]
+        num_points = [27, 27]
 
         # Visualize the look_at_point as a sphere
         # look_at_sphere = self.pyb.con.loadURDF("sphere2.urdf", look_at_point, globalScaling=0.05, useFixedBase=True)
@@ -33,6 +33,8 @@ class AlignHemisphere:
 
         hemisphere_pts = sample_hemisphere_suface_pts(look_at_point, look_at_point_offset, 0.25, num_points)
         hemisphere_oris = hemisphere_orientations(look_at_point, hemisphere_pts)
+
+        print(len(hemisphere_pts))
 
         # Iterate through position and orientation pairs
         iteration = 0

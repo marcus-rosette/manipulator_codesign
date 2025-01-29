@@ -111,12 +111,12 @@ class PathCache:
             # Save end effector solutions
             np.savetxt(save_data_filename, end_effector_solu_cleaned, delimiter=",", header="j1,j2,j3,j4,j5,j6,end_effector_x,end_effector_y,end_effector_z,quat_x,quat_y,quat_z,quat_w,manipulability", comments='')
 
-            np.savetxt('/home/marcus/apple_harvest_ws/src/apple-harvest/harvest_control/resource/voxel_ik_data.csv', end_effector_solu_cleaned, delimiter=",", header="j1,j2,j3,j4,j5,j6,end_effector_x,end_effector_y,end_effector_z,quat_x,quat_y,quat_z,quat_w,manipulability", comments='')
+            np.savetxt('/home/marcus/apple_harvest_ws/src/apple-harvest/harvest_control/resource/voxel_ik_data_fine_bottom_hemisphere.csv', end_effector_solu_cleaned, delimiter=",", header="j1,j2,j3,j4,j5,j6,end_effector_x,end_effector_y,end_effector_z,quat_x,quat_y,quat_z,quat_w,manipulability", comments='')
 
             # Save associated paths as a .npy file
             np.save(path_filename, best_paths_cleaned)
 
-            np.save('/home/marcus/apple_harvest_ws/src/apple-harvest/harvest_control/resource/reachable_paths.npy', best_paths_cleaned)
+            np.save('/home/marcus/apple_harvest_ws/src/apple-harvest/harvest_control/resource/reachable_paths_fine_bottom_hemisphere.npy', best_paths_cleaned)
 
         return nan_mask
 
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     robot_home_pos = [np.pi/2, -np.pi/2, 2*np.pi/3, 5*np.pi/6, -np.pi/2, 0]
     path_cache = PathCache(robot_urdf_path="./urdf/ur5e/ur5e.urdf", renders=render, robot_home_pos=robot_home_pos)
 
-    num_hemisphere_points = [10, 10]
+    num_hemisphere_points = [27, 27]
     look_at_point_offset = 0.0
     hemisphere_radius = 0.15
 
@@ -139,8 +139,8 @@ if __name__ == "__main__":
     voxel_centers_shifted[:, 1] += y_trans
 
     num_configs_in_path = 100
-    save_data_filename = './data/voxel_ik_data.csv'
-    path_filename = './data/reachable_paths'
+    save_data_filename = './data/voxel_ik_data_fine_bottom_hemisphere.csv'
+    path_filename = './data/reachable_paths_fine_bottom_hemisphere'
     
     nan_mask = path_cache.find_high_manip_ik(voxel_centers_shifted, 
                                              num_hemisphere_points, 
@@ -153,9 +153,9 @@ if __name__ == "__main__":
     # Filtered voxel_data
     voxel_data_filtered = voxel_centers_shifted[nan_mask]
     print(voxel_data_filtered.shape)
-    filename = './data/reachable_voxels_centers.csv'
+    filename = './data/reachable_voxels_centers_fine_bottom_hemisphere.csv'
     np.savetxt(filename, voxel_data_filtered)
 
-    filename2 = '/home/marcus/apple_harvest_ws/src/apple-harvest/harvest_control/resource/reachable_voxel_centers.csv'
+    filename2 = '/home/marcus/apple_harvest_ws/src/apple-harvest/harvest_control/resource/reachable_voxel_centers_fine_bottom_hemisphere.csv'
     np.savetxt(filename2, voxel_data_filtered)
     
