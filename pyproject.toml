@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "manipulator_codesign"
+version = "0.0.1"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Marcus Rosette", email = "rosettem@oregonstate.edu" },
+]
+maintainers = [
+    { name = "Marcus Rosette", email = "rosettem@oregonstate.edu" },
+]
+description = "A PyBullet package for simulating a scene and controlling a robot (from URDF)."
+requires-python = ">=3.8"
+dependencies = [
+    "numpy==1.26.4",
+    "opencv-python",
+    "pybullet==3.2.6",
+    "pyyaml",
+]
