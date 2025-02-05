@@ -1,5 +1,4 @@
 import os
-import matplotlib.colors as mcolors
 import xml.etree.ElementTree as ET
 
 class URDFGen:
@@ -14,7 +13,7 @@ class URDFGen:
         self.robot = ET.Element('robot', name=robot_name)
         self.save_urdf_dir = save_urdf_dir
     
-    def create_link(self, name, type='cylinder', link_len=1, link_width=0.05, origin=[0, 0, 0, 0, 0, 0], material='gray', color=[0.5, 0.5, 0.5, 1], collision=True, inertial=False):
+    def create_link(self, name, type='cylinder', shape_dim=[1, 0.1], origin=[0, 0, 0, 0, 0, 0], material='gray', color=[0.5, 0.5, 0.5, 1], collision=True, inertial=False):
         """
         Create a URDF link element.
         Parameters:
@@ -50,7 +49,6 @@ class URDFGen:
             collision_geometry = ET.SubElement(collision_elem, 'geometry')
 
         shape_elements = {'cylinder': 'cylinder', 'box': 'box', 'sphere': 'sphere'}
-        shape_dim = [link_len, link_width]
         if type in shape_elements:
             ET.SubElement(geometry, shape_elements[type], **self._shape_attributes(type, shape_dim))
             if collision:
@@ -86,7 +84,6 @@ class URDFGen:
         return joint
     
     def add_custom_gripper(self, parent, last_link_length):
-        # TODO: Need to update functionality for changing shape_dim to just the link lengths
         self.robot.append(self.create_joint('wrist_joint', parent, 'wrist', [0, 0, last_link_length + 0.025, 0, 0, 0], 'fixed'))
         self.robot.append(self.create_link('wrist', 'box', [0.05, 0.25, 0.05], material='purple', color=[0.5, 0, 0.5, 1]))
         self.robot.append(self.create_joint('left_finger_joint', 'wrist', 'left_finger', [0, -0.1, 0.075, 0, 0, 0], 'fixed'))
@@ -120,12 +117,12 @@ class URDFGen:
             file_path = f"{base}_{counter}{ext}"
             counter += 1
 
-        print(f"Saving new urdf to: {file_path}")
+        print(f"Saving file to: {file_path}")
 
         tree = ET.ElementTree(self.robot)
         tree.write(file_path, xml_declaration=True, encoding='utf-8', method='xml')
     
-    def create_manipulator(self, axes, joint_types, link_lens, link_shape='cylinder', collision=False, gripper=False):
+    def create_manipulator(self, axes, shape_dims, link_shape='cylinder', gripper=False, collision=False):
         """
         Creates a manipulator robot model with specified parameters.
         Args:
@@ -137,49 +134,30 @@ class URDFGen:
         Returns:
             None
         """
-        # TODO: Need to verify collision mapping. Note -> validate through doing a collision check with pybullet
-
-        axes = [self.map_axis_input(axis) for axis in axes]
-        joint_types = [self.map_joint_type(joint_type) for joint_type in joint_types]
-        colors = {name: mcolors.to_rgba(color) for name, color in mcolors.CSS4_COLORS.items()}
+        colors = {'blue': [0, 0, 1, 1], 'green': [0, 1, 0, 1], 'yellow': [1, 1, 0, 1], 'purple': [0.5, 0, 0.5, 1], 'pink': [1, 0, 1, 1], 'red': [1, 0, 0, 1]}
+        
+        prismatic_pos = [idx for idx, dims in enumerate(shape_dims) if dims == [0, 0]]
+        collision_idx = [num - 1 for num in prismatic_pos if num - 1 >= 0] + [num + 1 for num in prismatic_pos]
         
         base_link_name = 'base_link'
         base_link_size = 0.25
-        self.robot.append(
-            self.create_link(name=base_link_name, 
-                             type='box', 
-                             link_len=base_link_size,
-                             link_width=base_link_size,
-                             material='gray', 
-                             color=[0.5, 0.5, 0.5, 1], 
-                             collision=False))
+        self.robot.append(self.create_link(name=base_link_name, type='box', shape_dim=[base_link_size, base_link_size, base_link_size], material='gray', color=[0.5, 0.5, 0.5, 1], collision=False))
         
         parent_name = base_link_name
         parent_length = base_link_size / 2
         
-        for i, (axis, child_length, joint_type) in enumerate(zip(axes, link_lens, joint_types)):
+        for i, (axis, (child_length, shape_radius)) in enumerate(zip(axes, shape_dims)):
             color_name, color_code = list(colors.items())[i]
-            if joint_type == 'prismatic':
+            joint_type = 'prismatic' if i in prismatic_pos else 'revolute'
+            if i in prismatic_pos:
                 parent_length += 0.005
+            if i in collision_idx:
                 collision = False
             
             joint_name = f'joint{i}'
             child_name = f'link{i}'
-            self.robot.append(
-                self.create_joint(joint_name, 
-                                  parent=parent_name, 
-                                  child=child_name, 
-                                  joint_type=joint_type, 
-                                  axis=axis, 
-                                  origin=[0, 0, parent_length, 0, 0, 0]))
-            self.robot.append(
-                self.create_link(child_name, 
-                                 type=link_shape, 
-                                 link_len=child_length,
-                                 origin=[0, 0, child_length / 2, 0, 0, 0], 
-                                 material=color_name, 
-                                 color=color_code, 
-                                 collision=collision))
+            self.robot.append(self.create_joint(joint_name, parent=parent_name, child=child_name, joint_type=joint_type, axis=axis, origin=[0, 0, parent_length, 0, 0, 0]))
+            self.robot.append(self.create_link(child_name, type=link_shape, shape_dim=[child_length, shape_radius], origin=[0, 0, child_length / 2, 0, 0, 0], material=color_name, color=color_code, collision=collision))
             
             parent_name = child_name
             parent_length = child_length
@@ -193,7 +171,7 @@ class URDFGen:
         Generate a dictionary of attributes for a given shape and its dimensions.
 
         Args:
-            shape (str): The type of shape ('cylinder', 'box', or 'sphere').
+            shape_type (str): The type of shape ('cylinder', 'box', or 'sphere').
             shape_dim (list or tuple): The dimensions of the shape. For 'cylinder', 
                                        provide [length, radius]. For 'box', provide 
                                        [length, width, height]. For 'sphere', provide 
@@ -208,60 +186,20 @@ class URDFGen:
         if shape_type == 'cylinder':
             return {'length': str(shape_dim[0]), 'radius': str(shape_dim[1])}
         elif shape_type == 'box':
-            return {'size': f"{shape_dim[0]} {shape_dim[1]} {shape_dim[1]}"}
+            return {'size': ' '.join(map(str, shape_dim))}
         elif shape_type == 'sphere':
             return {'radius': str(shape_dim[0])}
         return {}
-    
-    @staticmethod
-    def map_axis_input(input_axis):
-        """
-        Maps input axis 'x', 'y', 'z' to '1 0 0', '0 1 0', '0 0 1', respectively.
-
-        Args:
-            input_axis (str): The input axis ('x', 'y', 'z').
-
-        Returns:
-            str: The corresponding axis in the format 'x y z'.
-        """
-        axis_mapping = {
-            'x': '1 0 0',
-            'y': '0 1 0',
-            'z': '0 0 1'
-        }
-        return axis_mapping.get(input_axis, '0 0 0')
-    
-    @staticmethod
-    def map_joint_type(input_joint_type):
-        """
-        Maps an input joint type identifier to its corresponding joint type name.
-
-        Args:
-            input_joint_type (int): The identifier for the joint type. 
-                                    Expected values are:
-                                    0 - 'prismatic'
-                                    1 - 'revolute'
-                                    2 - 'spherical'
-
-        Returns:
-            str: The name of the joint type corresponding to the input identifier.
-                 Defaults to 'revolute' if the input identifier is not recognized.
-        """
-        joint_type_mapping = {
-            0: 'prismatic',
-            1: 'revolute',
-            2: 'spherical'
-        }
-        return joint_type_mapping.get(input_joint_type, 'revolute')
 
 
 if __name__ == '__main__':
-    robot_name = 'test_robot'
+    robot_name = 'maybe'
     urdf_gen = URDFGen('dumb_robot')
 
-    axes = ['y', 'x', 'y', 'x', 'x']
-    joint_types = [1, 1, 1, 1, 1]
-    link_lens = [0.5, 0.5, 0.5, 0.5, 0.5]
-                   
-    urdf_gen.create_manipulator(axes, joint_types, link_lens, link_shape='cylinder')
+    # axes = ['0 0 1', '0 0 1', '1 0 0', '1 0 0', '0 1 0', '1 0 0']
+    # shape_dims = [[0.5, 0.05], [0, 0], [0.5, 0.05], [0.5, 0.05], [0.5, 0.05], [0.5, 0.05]]
+
+    axes = ['0 1 0', '1 0 0', '0 1 0', '1 0 0', '1 0 0']
+    shape_dims = [[0, 0], [0.5, 0.05], [0, 0], [0.5, 0.05], [0.5, 0.05]]
+    urdf_gen.create_manipulator(axes, shape_dims, link_shape='cylinder', gripper=True)
     urdf_gen.save_urdf(robot_name)

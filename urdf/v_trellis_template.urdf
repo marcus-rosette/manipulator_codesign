@@ -1,0 +1,114 @@
+<?xml version="1.0"?>
+<robot name="tree_structure">
+
+    <!-- Leader branch -->
+    <link name="leader_branch">
+        <visual>
+            <geometry>
+                <cylinder length="4.0" radius="0.08" />
+            </geometry>
+            <origin xyz="0 0 2" rpy="0 0 0" /> <!-- Positioned to extend from ground (z=0) to z=4 -->
+            <material name="gray" />
+        </visual>
+        <collision>
+            <geometry>
+                <cylinder length="4.0" radius="0.08" />
+            </geometry>
+            <origin xyz="0 0 2" rpy="0 0 0" /> 
+        </collision>
+    </link>
+
+    <!-- Horizontal branch 1 (lowest) -->
+    <link name="horizontal_branch_1">
+        <visual>
+            <geometry>
+                <cylinder length="4.0" radius="0.04" />
+            </geometry>
+            <origin xyz="0 0 0" rpy="0 1.5708 0" /> 
+            <material name="brown" />
+        </visual>
+        <collision>
+            <geometry>
+                <cylinder length="4.0" radius="0.04" />
+            </geometry>
+            <origin xyz="0 0 0" rpy="0 1.5708 0" />
+        </collision>
+    </link>
+
+    <!-- Horizontal branch 2 -->
+    <link name="horizontal_branch_2">
+        <visual>
+            <geometry>
+                <cylinder length="4.0" radius="0.04" />
+            </geometry>
+            <origin xyz="0 0 0" rpy="0 1.5708 0" /> 
+            <material name="brown" />
+        </visual>
+        <collision>
+            <geometry>
+                <cylinder length="4.0" radius="0.04" />
+            </geometry>
+            <origin xyz="0 0 0" rpy="0 1.5708 0" />
+        </collision>
+    </link>
+
+    <!-- Horizontal branch 3 -->
+    <link name="horizontal_branch_3">
+        <visual>
+            <geometry>
+                <cylinder length="4.0" radius="0.04" />
+            </geometry>
+            <origin xyz="0 0 0" rpy="0 1.5708 0" /> 
+            <material name="brown" />
+        </visual>
+        <collision>
+            <geometry>
+                <cylinder length="4.0" radius="0.04" />
+            </geometry>
+            <origin xyz="0 0 0" rpy="0 1.5708 0" />
+        </collision>
+    </link>
+
+    <!-- Horizontal branch 4 (highest) -->
+    <link name="horizontal_branch_4">
+        <visual>
+            <geometry>
+                <cylinder length="4.0" radius="0.04" />
+            </geometry>
+            <origin xyz="0 0 0" rpy="0 1.5708 0" /> 
+            <material name="brown" />
+        </visual>
+        <collision>
+            <geometry>
+                <cylinder length="4.0" radius="0.04" />
+            </geometry>
+            <origin xyz="0 0 0" rpy="0 1.5708 0" />
+        </collision>
+    </link>
+
+    <!-- Joints to attach the branches to the leader branch -->
+    <joint name="joint_branch_1" type="fixed">
+        <parent link="leader_branch" />
+        <child link="horizontal_branch_1" />
+        <origin xyz="0 0 1" rpy="0 0 0" /> 
+    </joint>
+
+    <joint name="joint_branch_2" type="fixed">
+        <parent link="leader_branch" />
+        <child link="horizontal_branch_2" />
+        <origin xyz="0 0 2" rpy="0 0 0" />
+    </joint>
+
+    <joint name="joint_branch_3" type="fixed">
+        <parent link="leader_branch" />
+        <child link="horizontal_branch_3" />
+        <origin xyz="0 0 3" rpy="0 0 0" />
+    </joint>
+
+    <joint name="joint_branch_4" type="fixed">
+        <parent link="leader_branch" />
+        <child link="horizontal_branch_4" />
+        <origin xyz="0 0 4" rpy="0 0 0" />
+    </joint>
+
+</robot>
