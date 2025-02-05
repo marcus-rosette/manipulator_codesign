@@ -572,6 +572,12 @@ class LoadRobot:
         ori_diff = np.pi - self.quaternion_angle_difference(np.array(target_orientation), np.array(final_orientation))
         return pos_diff <= pos_tolerance and np.abs(ori_diff) <= ori_tolerance
     
+    def get_jacobian(self, joint_positions):
+        zero_vec = [0.0] * len(joint_positions)
+        jac_t, jac_r = self.con.calculateJacobian(self.robotId, self.end_effector_index, [0, 0, 0], joint_positions, zero_vec, zero_vec)
+        jacobian = np.vstack((jac_t, jac_r))
+        return jacobian
+    
     def jacobian_viz(self, jacobian, end_effector_pos):
         # Visualization of the Jacobian columns
         num_columns = jacobian.shape[1]
