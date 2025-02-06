@@ -19,5 +19,9 @@ dependencies = [
     "numpy==1.26.4",
     "opencv-python",
     "pybullet==3.2.6",
+    "pybullet_planning",
     "pyyaml",
+    "matplotlib",
+    "scipy",
+    "open3d",
 ]
