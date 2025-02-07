@@ -16,7 +16,7 @@ plane_id = p.loadURDF("plane.urdf")
 # Load the robot URDF
 # robotId = p.loadURDF("/home/marcus/IMML/manipulator_codesign/urdf/ur5e/ur5e.urdf", basePosition=[0, 0, 0], useFixedBase=True)
 # robotId = p.loadURDF("/home/marcus/IMML/manipulator_codesign/urdf/maybe.urdf", basePosition=[0, 0, 0], useFixedBase=True)
-robotId = p.loadURDF("/home/marcus/IMML/manipulator_codesign/urdf/test_robot_6.urdf", basePosition=[0, 0, 0], useFixedBase=True)
+robotId = p.loadURDF("/home/marcus/IMML/manipulator_codesign/urdf/test_robot.urdf", basePosition=[0, 0, 0], useFixedBase=True)
 
 num_joints = p.getNumJoints(robotId)
 end_effector_index = num_joints - 1

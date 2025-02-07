@@ -12,3 +12,9 @@ This package provides a PyBullet-based simulation framework for generating and c
 - **Manipulability Analysis**: Evaluate and optimize configurations based on manipulability metrics.
 - **Workspace Sampling**: Workspace voxelization is used to discretize and sample regions that are reachable by the robot.
 - **Simulation Visualization**: Visualize the robot and simulation environment with PyBullet.
+
+
+### Installation
+```bash
+python -m pip install .
+```
