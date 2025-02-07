@@ -3,17 +3,4 @@ figures/
 point_clouds/
 meshes/
 
-todos.txt
-
-scripts/__pycache__
-scripts/test/load_urdf.py
-scripts/test/ice_cream_cone.py
-scripts/test/ur5e_trajectory_controller.py
-scripts/test/scratch.py
-scripts/test/more_scratch.py
-
-urdf/auto_gen_manip.urdf
-urdf/example_robot.urdf
-urdf/new.urdf
-urdf/prrr_manipulator_long.urdf
-urdf/rrr_manipulator_no_gripper.urdf
+src/manipulator_codesign/__pycache__

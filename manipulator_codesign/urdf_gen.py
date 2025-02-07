@@ -3,7 +3,7 @@ import matplotlib.colors as mcolors
 import xml.etree.ElementTree as ET
 
 class URDFGen:
-    def __init__(self, robot_name, save_urdf_dir='urdf/'):
+    def __init__(self, robot_name, save_urdf_dir=None):
         """
         Initializes the URDF generator with the specified robot name and directory to save the URDF file.
 
@@ -12,7 +12,12 @@ class URDFGen:
             save_urdf_dir (str, optional): The directory where the URDF file will be saved. Defaults to 'urdf/'.
         """
         self.robot = ET.Element('robot', name=robot_name)
-        self.save_urdf_dir = save_urdf_dir
+
+        if save_urdf_dir is None:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            self.save_urdf_dir = os.path.join(current_dir, 'urdf/')
+        else:
+            self.save_urdf_dir = save_urdf_dir
     
     def create_link(self, name, type='cylinder', link_len=1, link_width=0.05, origin=[0, 0, 0, 0, 0, 0], material='gray', color=[0.5, 0.5, 0.5, 1], collision=True, inertial=False):
         """
