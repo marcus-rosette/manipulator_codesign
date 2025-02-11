@@ -1,44 +1,71 @@
-import pybullet as p
-import pybullet_data
-import time
 import numpy as np
+import sys
+import os
 
-# Initialize PyBullet simulation
-physics_client = p.connect(p.GUI)
-p.setAdditionalSearchPath(pybullet_data.getDataPath())
+# Get the parent directory and add it to sys.path
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(parent_dir)
 
-# Set gravity for the simulation
-p.setGravity(0, 0, -9.81)
-
-# Load the plane URDF
-plane_id = p.loadURDF("plane.urdf")
-
-# Load the robot URDF
-# robotId = p.loadURDF("/home/marcus/IMML/manipulator_codesign/urdf/ur5e/ur5e.urdf", basePosition=[0, 0, 0], useFixedBase=True)
-# robotId = p.loadURDF("/home/marcus/IMML/manipulator_codesign/urdf/maybe.urdf", basePosition=[0, 0, 0], useFixedBase=True)
-robotId = p.loadURDF("/home/marcus/IMML/manipulator_codesign/urdf/test_robot.urdf", basePosition=[0, 0, 0], useFixedBase=True)
-
-num_joints = p.getNumJoints(robotId)
-end_effector_index = num_joints - 1
-
-controllable_idx = []
-for joint in range(p.getNumJoints(robotId)):
-    if p.getJointInfo(robotId, joint)[2] == p.JOINT_REVOLUTE: 
-        controllable_idx.append(p.getJointInfo(robotId, joint)[0])
-
-# print([p.getJointState(robotId, i)[0] for i in controllable_idx])
-
-# Set initial joint positions (if needed)
-initial_joint_positions = [0.5, 0, 1.57, 0, 1.57, 0]  # Replace with the initial joint positions for your robot
-
-for i, joint_index in enumerate(controllable_idx):
-    p.resetJointState(robotId, joint_index, initial_joint_positions[i])
-
-link_state = p.getLinkState(robotId, end_effector_index)
-link_position = np.array(link_state[0])
+from pyb_utils import PybUtils
+from load_objects import LoadObjects
+from load_robot import LoadRobot
 
 
-# # Simulation loop to keep the GUI open
-while True:
-    p.stepSimulation()
-    time.sleep(1./240.)  # Simulate at 240 Hz
+class PathCache:
+    def __init__(self, robot_urdf_path: str, robot_home_pos, ik_tol=0.05, renders=True):
+        """ Generate a cache of paths to high scored manipulability configurations
+
+        Args:
+            robot_urdf_path (str): filename/path to urdf file of robot
+            renders (bool, optional): visualize the robot in the PyBullet GUI. Defaults to True.
+        """
+        self.pyb = PybUtils(self, renders=renders)
+        self.object_loader = LoadObjects(self.pyb.con)
+
+        self.robot_home_pos = robot_home_pos
+        self.robot = LoadRobot(self.pyb.con, 
+                               robot_urdf_path, 
+                               [0, 0, 0], 
+                               self.pyb.con.getQuaternionFromEuler([0, 0, 0]), 
+                               self.robot_home_pos, 
+                               collision_objects=self.object_loader.collision_objects)
+
+        self.ik_tol = ik_tol
+
+    def main(self):
+        target_positions = [
+            [1.0, 2.0, 1.0],
+            [0.5, 1.5, 1.2],
+            [-0.5, 1.0, 0.8],
+            [0.0, 1.0, 1.0],
+            [-1.0, 1.5, 1.2],
+            [-0.5, 0.5, 0.1],
+            [0.5, 0.5, 0.1],
+        ]
+        # target_point = target_positions[0]
+        target_point = [1.5, 0.2, 0.3]
+        self.object_loader.load_urdf("sphere2.urdf", 
+                                     start_pos=target_point, 
+                                     start_orientation=[0, 0, 0], 
+                                     fix_base=True, 
+                                     radius=0.05)
+        
+        joint_config = self.robot.inverse_kinematics(target_point, pos_tol=self.ik_tol)
+        print(joint_config)
+        self.robot.set_joint_positions(joint_config)
+
+        while True:
+            self.pyb.con.stepSimulation()
+
+            
+if __name__ == "__main__":
+    render = True
+    robot_home_pos = [0, 0, 0, 0, 0]
+    # path_cache = PathCache(robot_urdf_path="/home/marcus/IMML/manipulator_codesign/manipulator_codesign/gen_urdf_files/best_chain_10.urdf", 
+    #                        renders=render, 
+    #                        robot_home_pos=robot_home_pos)
+    path_cache = PathCache(robot_urdf_path="/home/marcus/IMML/manipulator_codesign/manipulator_codesign/urdf/test_robot.urdf", 
+                        renders=render, 
+                        robot_home_pos=robot_home_pos)
+    
+    path_cache.main()

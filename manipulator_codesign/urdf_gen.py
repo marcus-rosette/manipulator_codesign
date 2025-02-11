@@ -1,6 +1,8 @@
 import os
 import matplotlib.colors as mcolors
 import xml.etree.ElementTree as ET
+import tempfile
+
 
 class URDFGen:
     def __init__(self, robot_name, save_urdf_dir=None):
@@ -19,7 +21,7 @@ class URDFGen:
         else:
             self.save_urdf_dir = save_urdf_dir
     
-    def create_link(self, name, type='cylinder', link_len=1, link_width=0.05, origin=[0, 0, 0, 0, 0, 0], material='gray', color=[0.5, 0.5, 0.5, 1], collision=True, inertial=False):
+    def create_link(self, name, type='cylinder', link_len=1, link_width=0.05, origin=[0, 0, 0, 0, 0, 0], material='gray', color=[0.5, 0.5, 0.5, 1], collision=True, inertial=True):
         """
         Create a URDF link element.
         Parameters:
@@ -90,15 +92,6 @@ class URDFGen:
         
         return joint
     
-    def add_custom_gripper(self, parent, last_link_length):
-        # TODO: Need to update functionality for changing shape_dim to just the link lengths
-        self.robot.append(self.create_joint('wrist_joint', parent, 'wrist', [0, 0, last_link_length + 0.025, 0, 0, 0], 'fixed'))
-        self.robot.append(self.create_link('wrist', 'box', [0.05, 0.25, 0.05], material='purple', color=[0.5, 0, 0.5, 1]))
-        self.robot.append(self.create_joint('left_finger_joint', 'wrist', 'left_finger', [0, -0.1, 0.075, 0, 0, 0], 'fixed'))
-        self.robot.append(self.create_link('left_finger', 'box', [0.05, 0.05, 0.15], material='purple', color=[0.5, 0, 0.5, 1]))
-        self.robot.append(self.create_joint('right_finger_joint', 'wrist', 'right_finger', [0, 0.1, 0.075, 0, 0, 0], 'fixed'))
-        self.robot.append(self.create_link('right_finger', 'box', [0.05, 0.05, 0.15], material='purple', color=[0.5, 0, 0.5, 1]))
-    
     def save_urdf(self, file_name):
         """
         Save the URDF (Unified Robot Description Format) file with a unique name.
@@ -125,12 +118,39 @@ class URDFGen:
             file_path = f"{base}_{counter}{ext}"
             counter += 1
 
-        print(f"Saving new urdf to: {file_path}")
+        print(f"\nSaving new urdf to: {file_path}")
 
         tree = ET.ElementTree(self.robot)
         tree.write(file_path, xml_declaration=True, encoding='utf-8', method='xml')
+
+    def save_temp_urdf(self):
+        """
+        Save the URDF (Unified Robot Description Format) file to a temporary file.
+
+        This method saves the URDF file to a temporary location and returns the path of the saved file.
+
+        Returns:
+            str: The path of the saved temporary URDF file.
+        """
+        tree = ET.ElementTree(self.robot)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".urdf") as tmpfile:
+            tree.write(tmpfile.name, xml_declaration=True, encoding='utf-8', method='xml')
+            return tmpfile.name
+        
+    def add_custom_gripper(self, parent, last_link_length):
+        # TODO: Need to update functionality for changing shape_dim to just the link lengths
+        self.robot.append(self.create_joint('wrist_joint', parent, 'wrist', [0, 0, last_link_length + 0.025, 0, 0, 0], 'fixed'))
+        self.robot.append(self.create_link('wrist', 'box', [0.05, 0.25, 0.05], material='purple', color=[0.5, 0, 0.5, 1]))
+        self.robot.append(self.create_joint('left_finger_joint', 'wrist', 'left_finger', [0, -0.1, 0.075, 0, 0, 0], 'fixed'))
+        self.robot.append(self.create_link('left_finger', 'box', [0.05, 0.05, 0.15], material='purple', color=[0.5, 0, 0.5, 1]))
+        self.robot.append(self.create_joint('right_finger_joint', 'wrist', 'right_finger', [0, 0.1, 0.075, 0, 0, 0], 'fixed'))
+        self.robot.append(self.create_link('right_finger', 'box', [0.05, 0.05, 0.15], material='purple', color=[0.5, 0, 0.5, 1]))
+
+    def add_end_effector_link(self, parent, last_link_length):
+        self.robot.append(self.create_joint('end_effector_joint', parent, 'end_effector', [0, 0, last_link_length, 0, 0, 0], 'fixed'))
+        self.robot.append(self.create_link('end_effector', link_len=0))
     
-    def create_manipulator(self, axes, joint_types, link_lens, link_shape='cylinder', collision=False, gripper=False):
+    def create_manipulator(self, axes, joint_types, link_lens, joint_lims, link_shape='cylinder', collision=False, gripper=False):
         """
         Creates a manipulator robot model with specified parameters.
         Args:
@@ -162,7 +182,7 @@ class URDFGen:
         parent_name = base_link_name
         parent_length = base_link_size / 2
         
-        for i, (axis, child_length, joint_type) in enumerate(zip(axes, link_lens, joint_types)):
+        for i, (axis, child_length, joint_type, joint_limit) in enumerate(zip(axes, link_lens, joint_types, joint_lims)):
             color_name, color_code = list(colors.items())[i]
             if joint_type == 'prismatic':
                 parent_length += 0.005
@@ -175,7 +195,8 @@ class URDFGen:
                                   parent=parent_name, 
                                   child=child_name, 
                                   joint_type=joint_type, 
-                                  axis=axis, 
+                                  axis=axis,
+                                  limit=joint_limit, 
                                   origin=[0, 0, parent_length, 0, 0, 0]))
             self.robot.append(
                 self.create_link(child_name, 
@@ -191,6 +212,8 @@ class URDFGen:
         
         if gripper:
             self.add_custom_gripper(parent=parent_name, last_link_length=parent_length)
+        else:
+            self.add_end_effector_link(parent=parent_name, last_link_length=parent_length)
     
     @staticmethod
     def _shape_attributes(shape_type, shape_dim):
@@ -267,6 +290,12 @@ if __name__ == '__main__':
     axes = ['y', 'x', 'y', 'x', 'x']
     joint_types = [1, 1, 1, 1, 1]
     link_lens = [0.5, 0.5, 0.5, 0.5, 0.5]
+
+    joint_limit_prismatic = (-0.5, 0.5)
+    joint_limit_revolute = (-3.14, 3.14)
+
+    # Map joint limits based on joint type
+    joint_limits = [joint_limit_prismatic if jt == 0 else joint_limit_revolute for jt in joint_types]
                    
-    urdf_gen.create_manipulator(axes, joint_types, link_lens, link_shape='cylinder')
+    urdf_gen.create_manipulator(axes, joint_types, link_lens, link_shape='cylinder', joint_lims=joint_limits)
     urdf_gen.save_urdf(robot_name)
