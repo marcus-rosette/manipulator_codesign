@@ -24,4 +24,6 @@ dependencies = [
     "matplotlib",
     "scipy",
     "open3d",
+    "spatialmath-python",
+    "roboticstoolbox-python",
 ]
