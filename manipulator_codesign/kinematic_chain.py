@@ -1,10 +1,7 @@
-# kinematic_chain.py
 import numpy as np
-import random
 import roboticstoolbox as rtb
 from spatialmath import SE3
 from urdf_gen import URDFGen
-# Import PyBullet-related modules if needed:
 from load_robot import LoadRobot
 
 # Base class with shared parameters and methods
@@ -12,6 +9,19 @@ class KinematicChainBase:
     def __init__(self, num_joints, joint_types, joint_axes, link_lengths, 
                  robot_name='silly_robot', save_urdf_dir=None,
                  joint_limit_prismatic=(-0.5, 0.5), joint_limit_revolute=(-np.pi, np.pi)):
+        """
+        Initialize the kinematic chain for the robot.
+
+        Args:
+            num_joints (int): Number of joints in the kinematic chain.
+            joint_types (list of int): Types of joints (0 for prismatic, 1 for revolute).
+            joint_axes (list of list of float): Axes of each joint.
+            link_lengths (list of float): Lengths of each link in the kinematic chain.
+            robot_name (str, optional): Name of the robot. Defaults to 'silly_robot'.
+            save_urdf_dir (str, optional): Directory to save the URDF file. Defaults to None.
+            joint_limit_prismatic (tuple of float, optional): Joint limits for prismatic joints. Defaults to (-0.5, 0.5).
+            joint_limit_revolute (tuple of float, optional): Joint limits for revolute joints. Defaults to (-np.pi, np.pi).
+        """
         self.num_joints = num_joints
         self.joint_types = joint_types
         self.joint_axes = joint_axes
@@ -28,12 +38,28 @@ class KinematicChainBase:
         self.urdf_gen = URDFGen(self.robot_name, self.save_urdf_dir)
 
     def create_urdf(self):
+        """
+        Generates a URDF (Unified Robot Description Format) representation of the manipulator.
+
+        This method uses the URDF generator to create a URDF file for the manipulator based on
+        the provided joint axes, joint types, link lengths, and joint limits.
+        """
         self.urdf_gen.create_manipulator(self.joint_axes, self.joint_types, self.link_lengths, self.joint_limits)
     
     def save_urdf(self, filename):
+        """
+        Save the URDF (Unified Robot Description Format) file.
+
+        Args:
+            filename (str): The name of the file where the URDF will be saved.
+        """
         self.urdf_gen.save_urdf(filename)
 
     def describe(self):
+        """
+        Prints a description of the kinematic chain, including the number of joints,
+        joint types, joint axes, and link lengths.
+        """
         print("\nKinematic Chain Description:")
         print(f"  Number of Joints: {self.num_joints}")
         print(f"  Joint Types: {self.joint_types}")
@@ -43,7 +69,6 @@ class KinematicChainBase:
     def compute_fitness(self, target):
         """
         Compute the error between the chain’s end-effector and a target position.
-        Each backend should implement its own version.
         """
         raise NotImplementedError("This method should be implemented in a subclass.")
 
@@ -78,8 +103,7 @@ class KinematicChainRTB(KinematicChainBase):
 
 # --- PyBullet Implementation ---
 class KinematicChainPyBullet(KinematicChainBase):
-    def __init__(self, pyb_con, num_joints, joint_types, joint_axes, link_lengths,
-                 save_urdf_dir='/path/to/save/dir', **kwargs):
+    def __init__(self, pyb_con, num_joints, joint_types, joint_axes, link_lengths, **kwargs):
         """
         pyb_con: A connection object from your PyBullet utilities.
         """

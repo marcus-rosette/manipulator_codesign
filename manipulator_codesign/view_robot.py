@@ -5,13 +5,16 @@ from load_objects import LoadObjects
 from load_robot import LoadRobot
 
 
-class PathCache:
+class ViewRobot:
     def __init__(self, robot_urdf_path: str, robot_home_pos, ik_tol=0.01, renders=True):
-        """ Generate a cache of paths to high scored manipulability configurations
+        """
+        Initialize the ViewRobot class.
 
         Args:
-            robot_urdf_path (str): filename/path to urdf file of robot
-            renders (bool, optional): visualize the robot in the PyBullet GUI. Defaults to True.
+            robot_urdf_path (str): Path to the URDF file of the robot.
+            robot_home_pos (list): Home position of the robot joints.
+            ik_tol (float, optional): Tolerance for inverse kinematics. Defaults to 0.01.
+            renders (bool, optional): Whether to visualize the robot in the PyBullet GUI. Defaults to True.
         """
         self.pyb = PybUtils(self, renders=renders)
         self.object_loader = LoadObjects(self.pyb.con)
@@ -59,11 +62,8 @@ class PathCache:
 if __name__ == "__main__":
     render = True
     robot_home_pos = [0, 0, 0, 0, 0]
-    path_cache = PathCache(robot_urdf_path="/home/marcus/IMML/manipulator_codesign/manipulator_codesign/gen_urdf_files/best_chain_4.urdf", 
-                           renders=render, 
-                           robot_home_pos=robot_home_pos)
-    # path_cache = PathCache(robot_urdf_path="/home/marcus/IMML/manipulator_codesign/manipulator_codesign/urdf/test_robot.urdf", 
-    #                     renders=render, 
-    #                     robot_home_pos=robot_home_pos)
+    view_robot = ViewRobot(robot_urdf_path="/home/marcus/IMML/manipulator_codesign/manipulator_codesign/urdf/robots/test_robot.urdf", 
+                        renders=render, 
+                        robot_home_pos=robot_home_pos)
     
-    path_cache.main()
+    view_robot.main()

@@ -6,6 +6,18 @@ from kinematic_chain import KinematicChainRTB, KinematicChainPyBullet
 class GeneticAlgorithm:
     def __init__(self, target_positions, backend='rtb', save_urdf_dir=None, population_size=20,
                  generations=100, mutation_rate=0.3, crossover_rate=0.7, renders=False):
+        """
+        Initialize the genetic algorithm for manipulator codesign.
+        Args:
+            target_positions (list or array-like): The target positions for the manipulator to reach.
+            backend (str, optional): The backend to use for simulation ('rtb' or 'pybullet'). Default is 'rtb'.
+            save_urdf_dir (str, optional): Directory to save URDF files. Default is None.
+            population_size (int, optional): The size of the population for the genetic algorithm. Default is 20.
+            generations (int, optional): The number of generations to run the genetic algorithm. Default is 100.
+            mutation_rate (float, optional): The mutation rate for the genetic algorithm. Default is 0.3.
+            crossover_rate (float, optional): The crossover rate for the genetic algorithm. Default is 0.7.
+            renders (bool, optional): Whether to render the simulation (only applicable for 'pybullet' backend). Default is False.
+        """
         self.target_positions = np.array(target_positions)
         self.population_size = population_size
         self.generations = generations
@@ -23,12 +35,35 @@ class GeneticAlgorithm:
             self.object_loader = LoadObjects(self.pyb.con)
     
     def _chain_factory(self, num_joints, joint_types, joint_axes, link_lengths):
+        """
+        Creates and returns a kinematic chain object based on the specified backend.
+        Args:
+            num_joints (int): The number of joints in the kinematic chain.
+            joint_types (list): A list specifying the types of each joint.
+            joint_axes (list): A list specifying the axes of each joint.
+            link_lengths (list): A list specifying the lengths of each link.
+        Returns:
+            KinematicChainPyBullet or KinematicChainRTB: An instance of the kinematic chain class 
+            based on the specified backend.
+        """
+
         if self.backend == 'pybullet':
             return KinematicChainPyBullet(self.pyb.con, num_joints, joint_types, joint_axes, link_lengths, save_urdf_dir=self.save_urdf_dir)
         else:  # default to RTB
             return KinematicChainRTB(num_joints, joint_types, joint_axes, link_lengths, save_urdf_dir=self.save_urdf_dir)
     
     def generate_random_chain(self, max_joints=5):
+        """
+        Generates a random kinematic chain for a manipulator.
+        This function creates a random kinematic chain with a specified maximum number of joints.
+        Each joint can be of a random type (e.g., revolute or prismatic) and oriented along a random axis.
+        The lengths of the links between the joints are also randomly generated within specified bounds.
+        Args:
+            max_joints (int, optional): The maximum number of joints in the chain. Defaults to 5.
+        Returns:
+            KinematicChain: A kinematic chain object created by the _chain_factory method.
+        """
+
         num_joints = random.randint(2, max_joints)
         joint_types = [random.choice([0, 1]) for _ in range(num_joints)]
         joint_axes = [random.choice(['x', 'y', 'z']) for _ in range(num_joints)]
@@ -37,12 +72,37 @@ class GeneticAlgorithm:
         return self._chain_factory(num_joints, joint_types, joint_axes, link_lengths)
     
     def fitness(self, chain):
+        """
+        Calculate the fitness of a given chain based on target positions.
+
+        The fitness is computed as the average error between the chain's computed
+        positions and the target positions.
+
+        Args:
+            chain (Chain): The chain object whose fitness is to be calculated.
+
+        Returns:
+            float: The average error representing the fitness of the chain.
+        """
+
         total_error = 0.0
         for target in self.target_positions:
             total_error += chain.compute_fitness(target)
         return total_error / len(self.target_positions)
     
     def crossover(self, parent1, parent2):
+        """
+        Perform crossover between two parent chains to produce a child chain.
+        This method combines the genetic information from two parent chains to create a new child chain.
+        The number of joints in the child chain is determined by randomly selecting the number of joints
+        from either parent if they differ. For each joint, the type and axis are randomly chosen from
+        either parent, and the link length is averaged if both parents have the joint at that position.
+        Args:
+            parent1 (KinematicChain): The first parent kinematic chain.
+            parent2 (KinematicChain): The second parent kinematic chain.
+        Returns:
+            KinematicChain: A new kinematic chain created by combining the genetic information from the two parents.
+        """
         if parent1.num_joints == parent2.num_joints:
             child_num_joints = parent1.num_joints
         else:
@@ -76,7 +136,15 @@ class GeneticAlgorithm:
         return self._chain_factory(child_num_joints, child_joint_types, child_joint_axes, child_link_lengths)
 
     def mutate(self, chain):
-        """Incrementally mutate a chain's parameters rather than generating an entirely new chain."""
+        """
+        Incrementally mutate a kinematic chain's parameters rather than generating an entirely new chain.
+
+        Args:
+            chain (KinematicChain): The kinematic chain to be mutated.
+
+        Returns:
+            KinematicChain: A new kinematic chain with mutated parameters.
+        """
         # Copy the current chain's parameters
         new_num_joints = chain.num_joints
         new_joint_types = chain.joint_types.copy()
@@ -121,7 +189,18 @@ class GeneticAlgorithm:
         return self._chain_factory(new_num_joints, new_joint_types, new_joint_axes, new_link_lengths)
     
     def run(self, error_threshold=0.005):
-        """Run the genetic algorithm optimization for kinematic chain design."""
+        """
+        Run the genetic algorithm optimization for kinematic chain design.
+        Args:
+            error_threshold (float, optional): The error threshold to determine convergence. 
+                               The algorithm stops if the best chain's error 
+                               is below this value. Default is 0.005.
+        Returns:
+            tuple: A tuple containing:
+            - best_chain (KinematicChain): The best kinematic chain found by the algorithm.
+            - total_chains_generated (int): The total number of chains generated during the run.
+            - total_iterations (int): The total number of generations processed.
+        """
         population = [self.generate_random_chain() for _ in range(self.population_size)]
         total_chains_generated = self.population_size
         total_iterations = 0

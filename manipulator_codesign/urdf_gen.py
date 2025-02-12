@@ -17,33 +17,35 @@ class URDFGen:
 
         if save_urdf_dir is None:
             current_dir = os.path.dirname(os.path.abspath(__file__))
-            self.save_urdf_dir = os.path.join(current_dir, 'urdf/')
+            self.save_urdf_dir = os.path.join(current_dir, 'urdf/robots/')
         else:
             self.save_urdf_dir = save_urdf_dir
     
-    def create_link(self, name, type='cylinder', link_len=1, link_width=0.05, origin=[0, 0, 0, 0, 0, 0], material='gray', color=[0.5, 0.5, 0.5, 1], collision=True, inertial=True):
+    def create_link(self, name, type='cylinder', link_len=1, link_width=0.05, mass=1.0, origin=[0, 0, 0, 0, 0, 0], material='gray', color=[0.5, 0.5, 0.5, 1], collision=True, inertial=True):
         """
         Create a URDF link element.
-        Parameters:
-        name (str): The name of the link.
-        type (str): The type of the shape ('cylinder', 'box', 'sphere'). Default is 'cylinder'.
-        shape_dim (list): Dimensions of the shape. Default is [1, 0.1].
-        origin (list): Origin of the link in the format [x, y, z, roll, pitch, yaw]. Default is [0, 0, 0, 0, 0, 0].
-        material (str): Name of the material. Default is 'gray'.
-        color (list): RGBA color of the material. Default is [0.5, 0.5, 0.5, 1].
-        collision (bool): Whether to include collision element. Default is True.
-        inertial (bool): Whether to include inertial element. Default is False.
+        
+        Args:
+            name (str): The name of the link.
+            type (str): The type of the shape ('cylinder', 'box', 'sphere'). Default is 'cylinder'.
+            link_len (float): The length of the link. Default is 1.
+            link_width (float): The width (or radius) of the link. Default is 0.05.
+            mass (float): The mass of the link. Default is 1.0.
+            origin (list): Origin of the link in the format [x, y, z, roll, pitch, yaw]. Default is [0, 0, 0, 0, 0, 0].
+            material (str): Name of the material. Default is 'gray'.
+            color (list): RGBA color of the material. Default is [0.5, 0.5, 0.5, 1].
+            collision (bool): Whether to include collision element. Default is True.
+            inertial (bool): Whether to include inertial element. Default is True.
+        
         Returns:
-        xml.etree.ElementTree.Element: The created link element.
+            xml.etree.ElementTree.Element: The created link element.
         """
         link = ET.Element('link', name=name)
         
         if inertial:
             inertial = ET.SubElement(link, 'inertial')
-            ET.SubElement(inertial, 'mass', value='1.0')
-            ET.SubElement(inertial, 'inertia',
-                          ixx='0.0', ixy='0.0', ixz='0.0',
-                          iyy='0.0', iyz='0.0', izz='0.0')
+            ET.SubElement(inertial, 'mass', value=str(mass))
+            ET.SubElement(inertial, 'inertia', **self.inertial_calculation(mass, link_len, link_width, type))
         
         visual = ET.SubElement(link, 'visual')
         ET.SubElement(visual, 'origin', xyz=' '.join(map(str, origin[:3])), rpy=' '.join(map(str, origin[3:])))
@@ -68,18 +70,18 @@ class URDFGen:
     def create_joint(self, name, parent, child, origin=[0, 0, 0, 0, 0, 0], joint_type='revolute', axis='0 0 1', limit=[-1.57, 1.57], effort=10, velocity=1):
         """
         Create a joint element for a URDF (Unified Robot Description Format) file.
-        Parameters:
-        name (str): The name of the joint.
-        parent (str): The name of the parent link.
-        child (str): The name of the child link.
-        origin (list): The origin of the joint in the format [x, y, z, roll, pitch, yaw]. Default is [0, 0, 0, 0, 0, 0].
-        joint_type (str): The type of the joint (e.g., 'revolute', 'prismatic'). Default is 'revolute'.
-        axis (str): The axis of rotation or translation in the format 'x y z'. Default is '0 0 1'.
-        limit (list): The limits of the joint in the format [lower, upper]. Default is [-1.57, 1.57].
-        effort (float): The maximum effort that can be applied by the joint. Default is 10.
-        velocity (float): The maximum velocity of the joint. Default is 1.
+        Args:
+            name (str): The name of the joint.
+            parent (str): The name of the parent link.
+            child (str): The name of the child link.
+            origin (list): The origin of the joint in the format [x, y, z, roll, pitch, yaw]. Default is [0, 0, 0, 0, 0, 0].
+            joint_type (str): The type of the joint (e.g., 'revolute', 'prismatic'). Default is 'revolute'.
+            axis (str): The axis of rotation or translation in the format 'x y z'. Default is '0 0 1'.
+            limit (list): The limits of the joint in the format [lower, upper]. Default is [-1.57, 1.57].
+            effort (float): The maximum effort that can be applied by the joint. Default is 10.
+            velocity (float): The maximum velocity of the joint. Default is 1.
         Returns:
-        xml.etree.ElementTree.Element: The joint element.
+            xml.etree.ElementTree.Element: The joint element.
         """
         joint = ET.Element('joint', name=name, type=joint_type)
         ET.SubElement(joint, 'parent', link=parent)
@@ -147,18 +149,36 @@ class URDFGen:
         self.robot.append(self.create_link('right_finger', 'box', [0.05, 0.05, 0.15], material='purple', color=[0.5, 0, 0.5, 1]))
 
     def add_end_effector_link(self, parent, last_link_length):
+        """
+        Adds an end effector link to the robot model.
+
+        This method appends a fixed joint and a link representing the end effector
+        to the robot's URDF model. The joint connects the specified parent link to
+        the end effector link.
+
+        Args:
+            parent (str): The name of the parent link to which the end effector will be attached.
+            last_link_length (float): The length of the last link in the chain before the end effector.
+
+        Returns:
+            None
+        """
         self.robot.append(self.create_joint('end_effector_joint', parent, 'end_effector', [0, 0, last_link_length, 0, 0, 0], 'fixed'))
         self.robot.append(self.create_link('end_effector', link_len=0))
     
     def create_manipulator(self, axes, joint_types, link_lens, joint_lims, link_shape='cylinder', collision=False, gripper=False):
         """
         Creates a manipulator robot model with specified parameters.
+
         Args:
             axes (list): A list of axes for each joint in the manipulator.
-            shape_dims (list): A list of tuples where each tuple contains the length and radius of each link.
+            joint_types (list): A list of joint types for each joint in the manipulator.
+            link_lens (list): A list of lengths for each link in the manipulator.
+            joint_lims (list): A list of joint limits for each joint in the manipulator.
             link_shape (str, optional): The shape of the links. Default is 'cylinder'.
-            collision (bool, optional): Whether to enable collision for the links. Default is True.
+            collision (bool, optional): Whether to enable collision for the links. Default is False.
             gripper (bool, optional): Whether to add a custom gripper at the end of the manipulator. Default is False.
+
         Returns:
             None
         """
@@ -281,6 +301,36 @@ class URDFGen:
             2: 'spherical'
         }
         return joint_type_mapping.get(input_joint_type, 'revolute')
+    
+    @staticmethod
+    def inertial_calculation(mass, link_length, link_width, type='cylinder'):
+        """
+        Calculate the inertia matrix for a given link based on its mass and dimensions.
+
+        Args:
+            mass (float): The mass of the link.
+            link_length (float): The length of the link.
+            link_width (float): The width (or radius) of the link.
+            type (str, optional): The type of the link ('cylinder', 'box'). Default is 'cylinder'.
+
+        Returns:
+            dict: A dictionary representing the inertia matrix with keys 'ixx', 'iyy', 'izz', 'ixy', 'ixz', 'iyz'.
+        """
+        if type == 'cylinder':
+            ixx = (1/12) * mass * (3 * link_width**2 + link_length**2)
+            iyy = (1/12) * mass * (3 * link_width**2 + link_length**2)
+            izz = 0.5 * mass * link_width**2
+        elif type == 'box':
+            ixx = (1/12) * mass * (link_length**2 + link_width**2)
+            iyy = (1/12) * mass * (link_length**2 + link_width**2)
+            izz = (1/12) * mass * (link_length**2 + link_width**2)
+        else:
+            raise ValueError("Unsupported shape type for inertia calculation.")
+
+        return {
+            'ixx': str(ixx), 'iyy': str(iyy), 'izz': str(izz),
+            'ixy': '0.0', 'ixz': '0.0', 'iyz': '0.0'  # Explicitly set to string format
+        }
 
 
 if __name__ == '__main__':
