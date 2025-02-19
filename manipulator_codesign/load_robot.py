@@ -3,10 +3,11 @@ import time
 from scipy.spatial.transform import Slerp
 from scipy.spatial.transform import Rotation as R
 from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
+from pybullet_planning import cartesian_motion_planning
 
 
 class LoadRobot:
-    def __init__(self, con, robot_urdf_path: str, start_pos, start_orientation, home_config, collision_objects=None) -> None:
+    def __init__(self, con, robot_urdf_path: str, start_pos, start_orientation, home_config, collision_objects=None, ee_link_name="tool0") -> None:
         """ Robot loader class
 
         Args:
@@ -26,6 +27,7 @@ class LoadRobot:
         self.home_ee_pos = None
         self.home_ee_ori = None
         self.collision_objects = collision_objects
+        self.ee_link_name = ee_link_name
 
         self.setup_robot()
 
@@ -38,8 +40,7 @@ class LoadRobot:
         self.robotId = self.con.loadURDF(self.robot_urdf_path, self.start_pos, self.start_orientation, useFixedBase=True, flags=flags)
         self.num_joints = self.con.getNumJoints(self.robotId)
 
-        self.end_effector_index = self.num_joints - 1
-        # print(f'\nSelected end-effector index info: {self.con.getJointInfo(self.robotId, self.end_effector_index)[:2]}')
+        self.end_effector_index = self.get_end_effector_index_by_name(self.ee_link_name)
 
         self.controllable_joint_idx = [
             self.con.getJointInfo(self.robotId, joint)[0]
@@ -54,10 +55,23 @@ class LoadRobot:
         self.joint_ranges = [upper - lower for lower, upper in zip(self.lower_limits, self.upper_limits)]
 
         # Set the home position
-        self.reset_joint_positions(self.home_config)
+        if self.home_config is not None:
+            self.reset_joint_positions(self.home_config)
 
         # Get the starting end-effector pos
         self.home_ee_pos, self.home_ee_ori = self.get_link_state(self.end_effector_index)
+
+    def get_end_effector_index_by_name(self, target_names=None):
+        """
+        Returns the first joint index whose link name matches one of the target_names.
+        """
+        if target_names is None:
+            target_names = ['ee_link', 'gripper_link', 'tool0']
+        for i in range(self.num_joints):
+            link_name = self.con.getJointInfo(self.robotId, i)[12].decode('utf-8')
+            if link_name in target_names:
+                return i
+        return None
 
     def set_joint_positions(self, joint_positions):
         for i, joint_idx in enumerate(self.controllable_joint_idx):
@@ -558,7 +572,57 @@ class LoadRobot:
             path = self.sample_path_to_length(path, steps)
         
         return path
+    
+    def plan_cartesian_motion_path(self, waypoint_poses, max_iterations=200, custom_limits={}, get_sub_conf=False, **kwargs):
+        """
+        Plans a Cartesian motion path along a series of end-effector waypoints 
+        using pybullet_planning.cartesian_motion_planning.plan_cartesian_motion.
+        
+        Parameters
+        ----------
+        waypoint_poses : list
+            A list of end-effector poses. Each pose should be a tuple (position, orientation),
+            where position is a 3-element list (or array) and orientation is a 4-element quaternion.
+        max_iterations : int, optional
+            Maximum iterations per waypoint (default is 200).
+        custom_limits : dict, optional
+            Custom joint limits dictionary to be passed to the planner (default {}).
+        get_sub_conf : bool, optional
+            If True, returns the sub-kinematics chain configuration (default False).
+        **kwargs : dict
+            Additional keyword arguments passed to the underlying IK pose-check (e.g., tolerances).
+        
+        Returns
+        -------
+        joint_path : list or None
+            A list of joint configurations corresponding to the planned Cartesian path,
+            or None if planning failed or if any configuration is in self collision.
+        """
+        # Call the library's function with the proper inputs.
+        joint_path = cartesian_motion_planning.plan_cartesian_motion(
+            robot=self.robotId,
+            first_joint=self.controllable_joint_idx[0],
+            target_link=self.end_effector_index,
+            waypoint_poses=waypoint_poses,
+            max_iterations=max_iterations,
+            custom_limits=custom_limits,
+            get_sub_conf=get_sub_conf,
+            **kwargs
+        )
+        
+        if joint_path is None:
+            # print("No valid path found by plan_cartesian_motion.")
+            return None
 
+        # Verify that none of the configurations in the path are in self-collision.
+        # Note: check_self_collision resets the robot's joints as part of the check.
+        for config in joint_path:
+            if len(self.check_self_collision(config)) > 0:
+                print("Self-collision detected in the planned path.")
+                return None
+
+        return joint_path
+    
     def quaternion_angle_difference(self, q1, q2):
         # Compute the quaternion representing the relative rotation
         q1_conjugate = q1 * np.array([1, -1, -1, -1])  # Conjugate of q1

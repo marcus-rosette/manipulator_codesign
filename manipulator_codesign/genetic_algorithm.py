@@ -1,10 +1,11 @@
 import numpy as np
 import random
+from scipy.spatial.transform import Rotation
 from kinematic_chain import KinematicChainRTB, KinematicChainPyBullet
 
 
 class GeneticAlgorithm:
-    def __init__(self, target_positions, backend='rtb', save_urdf_dir=None, population_size=20,
+    def __init__(self, target_positions, waypoints, backend='rtb', save_urdf_dir=None, population_size=20,
                  generations=100, mutation_rate=0.3, crossover_rate=0.7, renders=False):
         """
         Initialize the genetic algorithm for manipulator codesign.
@@ -19,6 +20,7 @@ class GeneticAlgorithm:
             renders (bool, optional): Whether to render the simulation (only applicable for 'pybullet' backend). Default is False.
         """
         self.target_positions = np.array(target_positions)
+        self.waypoints = waypoints
         self.population_size = population_size
         self.generations = generations
         self.mutation_rate = mutation_rate  
@@ -79,16 +81,23 @@ class GeneticAlgorithm:
         positions and the target positions.
 
         Args:
-            chain (Chain): The chain object whose fitness is to be calculated.
+            chain (KinematicChain): The chain object whose fitness is to be calculated.
 
         Returns:
             float: The average error representing the fitness of the chain.
         """
 
-        total_error = 0.0
-        for target in self.target_positions:
-            total_error += chain.compute_fitness(target)
-        return total_error / len(self.target_positions)
+        # total_error = 0.0
+        # for target in self.target_positions:
+        #     total_error += chain.compute_fitness(target)
+        # return total_error / len(self.target_positions)
+        target_error = np.mean([chain.compute_fitness(target) for target in self.target_positions])
+        tracking_error = chain.compute_motion_plan_fitness(self.waypoints)
+
+        # Weight factors: prioritize Cartesian tracking while considering target reachability
+        total_fitness = 0.7 * tracking_error + 0.3 * target_error
+        return total_fitness
+        # return tracking_error
     
     def crossover(self, parent1, parent2):
         """
@@ -134,7 +143,7 @@ class GeneticAlgorithm:
             child_link_lengths.append(link_length)
         
         return self._chain_factory(child_num_joints, child_joint_types, child_joint_axes, child_link_lengths)
-
+    
     def mutate(self, chain):
         """
         Incrementally mutate a kinematic chain's parameters rather than generating an entirely new chain.
@@ -187,6 +196,61 @@ class GeneticAlgorithm:
 
         # Create a new mutated chain using the modified parameters
         return self._chain_factory(new_num_joints, new_joint_types, new_joint_axes, new_link_lengths)
+
+    def mutate_aggressive(self, chain):
+        """
+        Mutate a kinematic chain. If the chain fails to produce a valid Cartesian path
+        (as determined by compute_motion_plan_fitness), apply a more aggressive mutation.
+        """
+        # First, assess the chain's ability to generate a valid motion plan.
+        tracking_fitness = chain.compute_motion_plan_fitness(self.waypoints)
+        
+        # Define a threshold; if the fitness is above this value, we consider the chain to have failed.
+        failure_threshold = 1e5  # For example, instead of 1e6, we use 1e5 as our indicator
+        aggressive_mutation = tracking_fitness >= failure_threshold
+
+        # Copy current chain parameters.
+        new_num_joints = chain.num_joints
+        new_joint_types = chain.joint_types.copy()
+        new_joint_axes = chain.joint_axes.copy()
+        new_link_lengths = chain.link_lengths.copy()
+
+        # If the chain fails to plan a valid motion, try to increase flexibility by adding a joint
+        if aggressive_mutation and new_num_joints < 7:
+            print("Aggressive mutation: adding a joint to increase DOF.")
+            new_joint_types.append(random.choice([0, 1]))
+            new_joint_axes.append(random.choice(['x', 'y', 'z']))
+            new_link_lengths.append(random.uniform(self.link_lengths_bounds[0], self.link_lengths_bounds[1]))
+            new_num_joints += 1
+
+        # Apply mutations to link lengths.
+        for i in range(new_num_joints):
+            # Increase the mutation magnitude if in aggressive mode.
+            mutation_strength = 0.1 if aggressive_mutation else 0.05
+            if random.random() < self.mutation_rate:
+                delta = random.gauss(0, mutation_strength)
+                new_link_lengths[i] = np.clip(new_link_lengths[i] + delta,
+                                            self.link_lengths_bounds[0], self.link_lengths_bounds[1])
+
+        # Mutate joint types with a slightly increased probability if in aggressive mode.
+        if aggressive_mutation or random.random() < (self.mutation_rate / 2):
+            idx = random.randint(0, new_num_joints - 1)
+            new_joint_types[idx] = 1 - new_joint_types[idx]
+
+        # Mutate joint axes with a slightly increased probability if in aggressive mode.
+        if aggressive_mutation or random.random() < (self.mutation_rate / 2):
+            idx = random.randint(0, new_num_joints - 1)
+            new_joint_axes[idx] = random.choice(['x', 'y', 'z'])
+
+        # Occasionally, remove a joint if the chain has too many (to avoid over-complicating the design).
+        if new_num_joints > 2 and random.random() < (self.mutation_rate / 4):
+            idx = random.randint(0, new_num_joints - 1)
+            del new_joint_types[idx]
+            del new_joint_axes[idx]
+            del new_link_lengths[idx]
+            new_num_joints -= 1
+
+        return self._chain_factory(new_num_joints, new_joint_types, new_joint_axes, new_link_lengths)
     
     def run(self, error_threshold=0.005):
         """
@@ -232,7 +296,7 @@ class GeneticAlgorithm:
                 child = self.crossover(parent1, parent2) if random.random() < self.crossover_rate else parent1
 
                 # Mutate the child further
-                child = self.mutate(child)
+                child = self.mutate_aggressive(child)
                 new_population.append(child)
                 total_chains_generated += 1
             
@@ -240,8 +304,7 @@ class GeneticAlgorithm:
         
         best_chain = population[0]  # Best kinematic chain
 
-        # Create and save a URDF of the best chain
-        best_chain.create_urdf()
+        # Save the URDF of the best chain
         best_chain.save_urdf('best_chain')
         
         return best_chain, total_chains_generated, total_iterations
@@ -250,22 +313,41 @@ class GeneticAlgorithm:
 if __name__ == '__main__':
     # Example Target End-Effector Position
     target_positions = [
-        [1.0, 2.0, 1.0],
+        [1.0, 1.0, 1.0],
         [0.5, 1.5, 1.2],
         [-0.5, 1.0, 0.8],
         [0.0, 1.0, 1.0],
         [-1.0, 1.5, 1.2],
         [-0.5, 0.5, 0.1],
-        [0.5, 0.5, 0.1],
+        [0.5, 0.5, 1.0],
+        [1.2, -0.5, 0.9],
+        [-1.2, 0.8, 1.1],
+        [0.3, -1.0, 1.3],
+        [-0.7, -1.2, 0.7],
+        [0.8, 1.3, 1.4],
+        [-1.1, -0.8, 0.6],
+        [0.6, -0.6, 1.5],
+        [-0.3, 0.7, 1.2]
     ]
 
-    # To run with the Robotics Toolbox backend:
-    ga_rtb = GeneticAlgorithm(target_positions, backend='rtb', population_size=20)
-    best_chain, total_generated, total_iters = ga_rtb.run(error_threshold=0.1)
+    # Create some example waypoints (interpolated between a start and end pose).
+    rot = Rotation.from_euler('xyz', [-90, 0, 0], degrees=True)
+    orientation = rot.as_quat()
+    start_pos = np.array([0.5, 0.75, 0.5])
+    end_pos = np.array([-0.5, 0.75, 0.5])
+    num_points = 10
+    waypoints = []
+    for t in np.linspace(0, 1, num_points):
+        interp_pos = (np.array(start_pos) * (1 - t) + np.array(end_pos) * t)
+        waypoints.append((interp_pos, orientation))
+
+    # # To run with the Robotics Toolbox backend:
+    # ga_rtb = GeneticAlgorithm(target_positions, backend='rtb', population_size=20, generations=20)
+    # best_chain, total_generated, total_iters = ga_rtb.run(error_threshold=0.02)
     
-    # # To run with the PyBullet backend, ensure that your PyBullet connection is set up:
-    # ga_pyb = GeneticAlgorithm(target_positions, backend='pybullet', population_size=20, renders=False)
-    # best_chain, total_generated, total_iters = ga_pyb.run(error_threshold=0.1)
+    # To run with the PyBullet backend, ensure that your PyBullet connection is set up:
+    ga_pyb = GeneticAlgorithm(target_positions, waypoints, backend='pybullet', population_size=40, generations=10, renders=False)
+    best_chain, total_generated, total_iters = ga_pyb.run(error_threshold=0.02)
 
     best_chain.describe()
     print(f"\nTotal Kinematic Chains Generated: {total_generated}")

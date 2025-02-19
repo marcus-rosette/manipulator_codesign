@@ -103,7 +103,7 @@ class KinematicChainRTB(KinematicChainBase):
 
 # --- PyBullet Implementation ---
 class KinematicChainPyBullet(KinematicChainBase):
-    def __init__(self, pyb_con, num_joints, joint_types, joint_axes, link_lengths, **kwargs):
+    def __init__(self, pyb_con, num_joints, joint_types, joint_axes, link_lengths, ee_link_name='end_effector', **kwargs):
         """
         pyb_con: A connection object from your PyBullet utilities.
         """
@@ -120,12 +120,71 @@ class KinematicChainPyBullet(KinematicChainBase):
                                urdf_path, 
                                start_pos=[0, 0, 0], 
                                start_orientation=self.pyb_con.getQuaternionFromEuler([0, 0, 0]),
-                               home_config=[0] * self.num_joints)
+                               home_config=[0] * self.num_joints,
+                               ee_link_name=ee_link_name)
+
+    def compute_pose_error(self, target_pose, actual_pose, weight_position=1.0, weight_orientation=0.5):
+        """
+        Compute a combined error between target and actual poses.
+        
+        Each pose is a tuple: (position, quaternion)
+        - position: a 3-element array
+        - quaternion: a 4-element array in [x, y, z, w] format
+        
+        Args:
+            target_pose (tuple): (position, quaternion) for the target.
+            actual_pose (tuple): (position, quaternion) for the actual pose.
+            weight_position (float): Weight for the position error.
+            weight_orientation (float): Weight for the orientation error.
+            
+        Returns:
+            float: The weighted error.
+        """
+        target_pos, target_quat = target_pose
+        actual_pos, actual_quat = actual_pose
+
+        # Compute position error (Euclidean distance)
+        pos_error = np.linalg.norm(np.array(target_pos) - np.array(actual_pos))
+        
+        # Normalize quaternions to be safe
+        target_quat = np.array(target_quat) / np.linalg.norm(target_quat)
+        actual_quat = np.array(actual_quat) / np.linalg.norm(actual_quat)
+        
+        # Compute orientation error as angular difference (in radians)
+        # Ensure the dot product is positive to get the smallest angle
+        dot_prod = np.abs(np.dot(target_quat, actual_quat))
+        # Clamp dot_prod to the valid range [-1, 1] to avoid numerical issues
+        dot_prod = np.clip(dot_prod, -1.0, 1.0)
+        ang_error = 2 * np.arccos(dot_prod)
+        
+        # Combine errors using the specified weights
+        total_error = weight_position * pos_error + weight_orientation * ang_error
+        return total_error
 
     def compute_fitness(self, target):
         # Compute fitness by solving IK in PyBullet.
-        joint_config = self.robot.inverse_kinematics(target, pos_tol=0.1)
+        # TODO: how much tolerance should we allow?
+        try:
+            joint_config = self.robot.inverse_kinematics(target, pos_tol=0.5)
+        except Exception as e:
+            print("IK Error:", e)
+            return 1e6 
         self.robot.reset_joint_positions(joint_config)
         ee_pos, _ = self.robot.get_link_state(self.robot.end_effector_index)
         error = np.linalg.norm(np.array(target) - np.array(ee_pos))
         return error
+    
+    def compute_motion_plan_fitness(self, pose_waypoints):
+        # Compute fitness by solving a motion plan in PyBullet.
+        joint_path = self.robot.plan_cartesian_motion_path(pose_waypoints, max_iterations=10000)
+        if joint_path is None:
+            return 1e6
+        else:
+            error = 0
+            for i, joint_config in enumerate(joint_path):
+                self.robot.reset_joint_positions(joint_config)
+                ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
+                ee_pose = (ee_pos, ee_ori)
+                error += self.compute_pose_error(pose_waypoints[i], ee_pose)
+            return error
+            
