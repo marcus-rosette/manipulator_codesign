@@ -16,8 +16,10 @@ maintainers = [
 description = "A PyBullet package for simulating a scene and controlling a robot (from URDF)."
 requires-python = ">=3.8"
 dependencies = [
+    "numpy",
     "opencv-python",
     "pybullet",
+    "ghalton==0.6.2"
     "pybullet_planning",
     "pyyaml",
     "matplotlib",

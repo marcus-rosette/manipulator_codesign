@@ -1,4 +1,4 @@
-name: Python package
+name: Manipulator Codesign Python Package
 
 on:
   push:
