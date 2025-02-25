@@ -28,3 +28,11 @@ dependencies = [
     "spatialmath-python",
     "roboticstoolbox-python",
 ]
+
+[tool.hatch.envs.default.scripts]
+build-ghalton = "CXXFLAGS='-std=c++11' pip install --no-cache-dir --no-binary ghalton ghalton"
+
+[tool.hatch.envs.default]
+post-install-commands = [
+    "hatch run build-ghalton"
+]
