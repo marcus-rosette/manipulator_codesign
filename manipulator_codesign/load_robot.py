@@ -35,7 +35,7 @@ class LoadRobot:
         """ Initialize robot
         """
         assert self.robotId is None
-        flags = self.con.URDF_USE_SELF_COLLISION
+        flags = self.con.URDF_USE_SELF_COLLISION | self.con.URDF_USE_SELF_COLLISION_INCLUDE_PARENT | self.con.URDF_USE_SELF_COLLISION_EXCLUDE_ALL_PARENTS
 
         self.robotId = self.con.loadURDF(self.robot_urdf_path, self.start_pos, self.start_orientation, useFixedBase=True, flags=flags)
         self.num_joints = self.con.getNumJoints(self.robotId)
@@ -55,8 +55,10 @@ class LoadRobot:
         self.joint_ranges = [upper - lower for lower, upper in zip(self.lower_limits, self.upper_limits)]
 
         # Set the home position
-        if self.home_config is not None:
-            self.reset_joint_positions(self.home_config)
+        if self.home_config is None:
+            self.home_config = [0.0] * len(self.controllable_joint_idx)
+
+        self.reset_joint_positions(self.home_config)
 
         # Get the starting end-effector pos
         self.home_ee_pos, self.home_ee_ori = self.get_link_state(self.end_effector_index)
@@ -121,9 +123,18 @@ class LoadRobot:
 
         return False
     
-    def inverse_kinematics(self, position, orientation=None, pos_tol=1e-4, rest_config=None):
+    def inverse_kinematics(self, pose, pos_tol=1e-4, rest_config=None):
         if rest_config is None:
             rest_config = self.home_config
+
+        if len(pose) == 3:
+            position = pose
+            orientation = None
+        elif len(pose) == 2:
+            position = pose[0]
+            orientation = pose[1]
+            if not isinstance(orientation, list):
+                orientation = orientation.tolist()
 
         if orientation is not None:
             joint_positions = self.con.calculateInverseKinematics(

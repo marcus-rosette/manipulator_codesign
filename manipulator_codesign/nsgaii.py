@@ -1,10 +1,11 @@
 import numpy as np
+from scipy.spatial.transform import Rotation
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.visualization.scatter import Scatter
 from pymoo.optimize import minimize
 
-from kinematic_chain import KinematicChainRTB, KinematicChainPyBullet
+from .kinematic_chain import KinematicChainRTB, KinematicChainPyBullet
 
 
 def decode_decision_vector(x, min_joints=2, max_joints=5):
@@ -152,16 +153,35 @@ if __name__ == '__main__':
         [0.6, -0.6, 1.5],
         [-0.3, 0.7, 1.2]
     ]
+
+    target_orientations = [
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 90, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat()
+    ]
+    target_poses = list(zip(target_positions, target_orientations))
     
     # You can update these variables to search over a different range of joints.
     min_joints = 2
     max_joints = 7
     
     # Instantiate the problem using the updated joint limits.
-    problem = KinematicChainProblem(target_positions, min_joints=min_joints, max_joints=max_joints)
+    problem = KinematicChainProblem(target_poses, min_joints=min_joints, max_joints=max_joints)
     
     # Configure the NSGA-II algorithm.
-    algorithm = NSGA2(pop_size=50, eliminate_duplicates=True)
+    algorithm = NSGA2(pop_size=30, eliminate_duplicates=True)
     
     # Run the optimization for 20 generations.
     res = minimize(problem,

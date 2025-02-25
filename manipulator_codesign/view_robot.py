@@ -1,8 +1,9 @@
 import numpy as np
 import time
-from pyb_utils import PybUtils
-from load_objects import LoadObjects
-from load_robot import LoadRobot
+from scipy.spatial.transform import Rotation
+from .pyb_utils import PybUtils
+from .load_objects import LoadObjects
+from .load_robot import LoadRobot
 
 
 class ViewRobot:
@@ -69,36 +70,51 @@ class ViewRobot:
                 time.sleep(1. / 240.)
 
     def main(self):
-        # target_positions = [
-        #     [1.0, 1.0, 1.0],
-        #     [0.5, 1.5, 1.2],
-        #     [-0.5, 1.0, 0.8],
-        #     [0.0, 1.0, 1.0],
-        #     [-1.0, 1.5, 1.2],
-        #     [-0.5, 0.5, 0.1],
-        #     [0.5, 0.5, 1.0],
-        #     [1.2, -0.5, 0.9],
-        #     [-1.2, 0.8, 1.1],
-        #     [0.3, -1.0, 1.3],
-        #     [-0.7, -1.2, 0.7],
-        #     [0.8, 1.3, 1.4],
-        #     [-1.1, -0.8, 0.6],
-        #     [0.6, -0.6, 1.5],
-        #     [-0.3, 0.7, 1.2]
-        # ]
         target_positions = [
-            [0.5, 0.5, 0.5],
-            [-0.5, 0.5, 0.5],
+            [1.0, 1.0, 1.0],
+            [0.5, 1.5, 1.2],
+            [-0.5, 1.0, 0.8],
+            [0.0, 1.0, 1.0],
+            [-1.0, 1.5, 1.2],
+            [-0.5, 0.5, 0.1],
+            [0.5, 0.5, 1.0],
+            [1.2, -0.5, 0.9],
+            [-1.2, 0.8, 1.1],
+            [0.3, -1.0, 1.3],
+            [-0.7, -1.2, 0.7],
+            [0.8, 1.3, 1.4],
+            [-1.1, -0.8, 0.6],
+            [0.6, -0.6, 1.5],
+            [-0.3, 0.7, 1.2]
         ]
-        for pt in target_positions:
+        target_orientations = [
+            Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [-90, 90, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+            Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat()
+        ]
+        target_poses = list(zip(target_positions, target_orientations))
+
+        for pose in target_positions:
             input("Press Enter to continue...")
             self.object_loader.load_urdf("sphere2.urdf", 
-                                        start_pos=pt, 
+                                        start_pos=pose, 
                                         start_orientation=[0, 0, 0], 
                                         fix_base=True, 
                                         radius=0.05)
         
-            joint_config = self.robot.inverse_kinematics(pt, pos_tol=self.ik_tol, orientation=list(self.pyb.con.getQuaternionFromEuler([-np.pi/2, 0, 0])))
+            joint_config = self.robot.inverse_kinematics(pose, pos_tol=self.ik_tol)
             self.robot.set_joint_positions(joint_config)
 
             # Step simulation and render
@@ -111,17 +127,17 @@ class ViewRobot:
 
             
 if __name__ == "__main__":
-    robot_urdf_path = "/home/marcus/IMML/manipulator_codesign/manipulator_codesign/urdf/robots/best_chain_4.urdf"
+    robot_urdf_path = "/home/marcus/IMML/manipulator_codesign/manipulator_codesign/urdf/robots/best_chain_pyb_GA_15poses_full_collision.urdf"
     ee_link_name = 'end_effector' # for best_chain
     # robot_urdf_path = '/home/marcus/IMML/manipulator_codesign/manipulator_codesign/urdf/robots/ur5e/ur5e.urdf'
     # ee_link_name = 'gripper_link' # for ur5e
     render = True
-    robot_home_pos = None
+    robot_home_pos = None #[0.4, 0.4, 0.4, 0.4, 0.4, 0.4]
     view_robot = ViewRobot(robot_urdf_path=robot_urdf_path, 
                         renders=render, 
                         robot_home_pos=robot_home_pos,
-                        ik_tol=0.01,
+                        ik_tol=0.1,
                         ee_link_name=ee_link_name)
     
-    view_robot.cartesian_path_test()
-    # view_robot.main()
+    # view_robot.cartesian_path_test()
+    view_robot.main()

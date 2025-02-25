@@ -1,8 +1,8 @@
 import numpy as np
 import roboticstoolbox as rtb
 from spatialmath import SE3
-from urdf_gen import URDFGen
-from load_robot import LoadRobot
+from .urdf_gen import URDFGen
+from .load_robot import LoadRobot
 
 # Base class with shared parameters and methods
 class KinematicChainBase:
@@ -123,7 +123,72 @@ class KinematicChainPyBullet(KinematicChainBase):
                                home_config=[0] * self.num_joints,
                                ee_link_name=ee_link_name)
 
-    def compute_pose_error(self, target_pose, actual_pose, weight_position=1.0, weight_orientation=0.5):
+    def compute_fitness(self, target):
+        """
+        Compute the fitness of the robot's configuration by solving the inverse kinematics (IK) problem.
+
+        This function attempts to find a joint configuration that achieves the specified target position
+        and orientation using the robot's inverse kinematics solver. It then computes the error between
+        the achieved end-effector position/orientation and the target. The error is used as the fitness
+        value, with lower values indicating better fitness.
+
+        Parameters:
+        target (list or tuple): The desired target position and/or orientation. If the length of the target
+                    is 1, it is assumed to be a position. Otherwise, it is assumed to be a 
+                    combination of position and orientation.
+
+        Returns:
+        float: The computed fitness value. A lower value indicates a better fit. If an error occurs during
+               IK computation, a large fitness value (1e6) is returned.
+        """
+        # Compute fitness by solving IK in PyBullet.
+        # TODO: how much tolerance should we allow?
+        try:
+            joint_config = self.robot.inverse_kinematics(target, pos_tol=0.1)
+        except Exception as e:
+            print("IK Error:", e)
+            return 1e6 
+        self.robot.reset_joint_positions(joint_config)
+        ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
+
+        if len(target) == 1:
+            error = np.linalg.norm(np.array(target) - np.array(ee_pos))
+        else:
+            error = self.compute_pose_error(target, (ee_pos, ee_ori), weight_position=2.0, weight_orientation=0.25)
+        return error
+    
+    def compute_motion_plan_fitness(self, pose_waypoints):
+        """
+        Compute the fitness of a motion plan by solving it in PyBullet.
+
+        This function plans a Cartesian motion path for the robot to follow the given
+        pose waypoints. It then computes the fitness of the motion plan based on the
+        error between the desired and actual end-effector poses.
+
+        Args:
+            pose_waypoints (list of tuple): A list of desired end-effector poses, where each
+                pose is represented as a tuple (position, orientation). Position is a tuple
+                of (x, y, z) coordinates, and orientation is a tuple of quaternion (x, y, z, w).
+
+        Returns:
+            float: The computed fitness value. A lower value indicates a better motion plan.
+                If the motion plan cannot be solved, a high fitness value of 1e6 is returned.
+        """
+        # Compute fitness by solving a motion plan in PyBullet.
+        joint_path = self.robot.plan_cartesian_motion_path(pose_waypoints, max_iterations=10000)
+        if joint_path is None:
+            return 1e6
+        else:
+            error = 0
+            for i, joint_config in enumerate(joint_path):
+                self.robot.reset_joint_positions(joint_config)
+                ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
+                ee_pose = (ee_pos, ee_ori)
+                error += self.compute_pose_error(pose_waypoints[i], ee_pose)
+            return error
+
+    @staticmethod        
+    def compute_pose_error(target_pose, actual_pose, weight_position=1.0, weight_orientation=1.0):
         """
         Compute a combined error between target and actual poses.
         
@@ -160,31 +225,3 @@ class KinematicChainPyBullet(KinematicChainBase):
         # Combine errors using the specified weights
         total_error = weight_position * pos_error + weight_orientation * ang_error
         return total_error
-
-    def compute_fitness(self, target):
-        # Compute fitness by solving IK in PyBullet.
-        # TODO: how much tolerance should we allow?
-        try:
-            joint_config = self.robot.inverse_kinematics(target, pos_tol=0.5)
-        except Exception as e:
-            print("IK Error:", e)
-            return 1e6 
-        self.robot.reset_joint_positions(joint_config)
-        ee_pos, _ = self.robot.get_link_state(self.robot.end_effector_index)
-        error = np.linalg.norm(np.array(target) - np.array(ee_pos))
-        return error
-    
-    def compute_motion_plan_fitness(self, pose_waypoints):
-        # Compute fitness by solving a motion plan in PyBullet.
-        joint_path = self.robot.plan_cartesian_motion_path(pose_waypoints, max_iterations=10000)
-        if joint_path is None:
-            return 1e6
-        else:
-            error = 0
-            for i, joint_config in enumerate(joint_path):
-                self.robot.reset_joint_positions(joint_config)
-                ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
-                ee_pose = (ee_pos, ee_ori)
-                error += self.compute_pose_error(pose_waypoints[i], ee_pose)
-            return error
-            

@@ -1,7 +1,7 @@
 import numpy as np
 import random
 from scipy.spatial.transform import Rotation
-from kinematic_chain import KinematicChainRTB, KinematicChainPyBullet
+from .kinematic_chain import KinematicChainRTB, KinematicChainPyBullet
 
 
 class GeneticAlgorithm:
@@ -19,13 +19,13 @@ class GeneticAlgorithm:
             crossover_rate (float, optional): The crossover rate for the genetic algorithm. Default is 0.7.
             renders (bool, optional): Whether to render the simulation (only applicable for 'pybullet' backend). Default is False.
         """
-        self.target_positions = np.array(target_positions)
+        self.target_positions = target_positions
         self.waypoints = waypoints
         self.population_size = population_size
         self.generations = generations
         self.mutation_rate = mutation_rate  
         self.crossover_rate = crossover_rate
-        self.link_lengths_bounds = (0.1, 0.75)
+        self.link_lengths_bounds = (0.05, 1.0)
         self.backend = backend
         self.save_urdf_dir = save_urdf_dir
 
@@ -87,16 +87,16 @@ class GeneticAlgorithm:
             float: The average error representing the fitness of the chain.
         """
 
-        # total_error = 0.0
-        # for target in self.target_positions:
-        #     total_error += chain.compute_fitness(target)
-        # return total_error / len(self.target_positions)
-        target_error = np.mean([chain.compute_fitness(target) for target in self.target_positions])
-        tracking_error = chain.compute_motion_plan_fitness(self.waypoints)
+        total_error = 0.0
+        for target in self.target_positions:
+            total_error += chain.compute_fitness(target)
+        return total_error / len(self.target_positions)
+        # target_error = np.mean([chain.compute_fitness(target) for target in self.target_positions])
+        # tracking_error = chain.compute_motion_plan_fitness(self.waypoints)
 
-        # Weight factors: prioritize Cartesian tracking while considering target reachability
-        total_fitness = 0.7 * tracking_error + 0.3 * target_error
-        return total_fitness
+        # # Weight factors: prioritize Cartesian tracking while considering target reachability
+        # total_fitness = 0.7 * tracking_error + 0.3 * target_error
+        # return total_fitness
         # return tracking_error
     
     def crossover(self, parent1, parent2):
@@ -265,7 +265,7 @@ class GeneticAlgorithm:
             - total_chains_generated (int): The total number of chains generated during the run.
             - total_iterations (int): The total number of generations processed.
         """
-        population = [self.generate_random_chain() for _ in range(self.population_size)]
+        population = [self.generate_random_chain(max_joints=6) for _ in range(self.population_size)]
         total_chains_generated = self.population_size
         total_iterations = 0
         
@@ -296,7 +296,7 @@ class GeneticAlgorithm:
                 child = self.crossover(parent1, parent2) if random.random() < self.crossover_rate else parent1
 
                 # Mutate the child further
-                child = self.mutate_aggressive(child)
+                child = self.mutate(child)
                 new_population.append(child)
                 total_chains_generated += 1
             
@@ -330,6 +330,25 @@ if __name__ == '__main__':
         [-0.3, 0.7, 1.2]
     ]
 
+    target_orientations = [
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 90, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
+        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat()
+    ]
+    target_poses = list(zip(target_positions, target_orientations))
+
     # Create some example waypoints (interpolated between a start and end pose).
     rot = Rotation.from_euler('xyz', [-90, 0, 0], degrees=True)
     orientation = rot.as_quat()
@@ -346,7 +365,7 @@ if __name__ == '__main__':
     # best_chain, total_generated, total_iters = ga_rtb.run(error_threshold=0.02)
     
     # To run with the PyBullet backend, ensure that your PyBullet connection is set up:
-    ga_pyb = GeneticAlgorithm(target_positions, waypoints, backend='pybullet', population_size=40, generations=10, renders=False)
+    ga_pyb = GeneticAlgorithm(target_poses, waypoints, backend='pybullet', population_size=30, generations=10, renders=False)
     best_chain, total_generated, total_iters = ga_pyb.run(error_threshold=0.02)
 
     best_chain.describe()

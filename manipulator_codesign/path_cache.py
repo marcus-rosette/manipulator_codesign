@@ -1,8 +1,8 @@
 import numpy as np
-from pyb_utils import PybUtils
-from load_objects import LoadObjects
-from load_robot import LoadRobot
-from sample_approach_points import sample_hemisphere_suface_pts, hemisphere_orientations
+from .pyb_utils import PybUtils
+from .load_objects import LoadObjects
+from .load_robot import LoadRobot
+from .sample_approach_points import sample_hemisphere_suface_pts, hemisphere_orientations
 
 
 class PathCache:
