@@ -19,7 +19,7 @@ dependencies = [
     "numpy",
     "opencv-python",
     "pybullet",
-    "ghalton==0.6.2"
+    "ghalton==0.6.2",
     "pybullet_planning",
     "pyyaml",
     "matplotlib",
