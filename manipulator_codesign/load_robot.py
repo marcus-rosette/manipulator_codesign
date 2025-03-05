@@ -35,7 +35,7 @@ class LoadRobot:
         """ Initialize robot
         """
         assert self.robotId is None
-        flags = self.con.URDF_USE_SELF_COLLISION | self.con.URDF_USE_SELF_COLLISION_INCLUDE_PARENT | self.con.URDF_USE_SELF_COLLISION_EXCLUDE_ALL_PARENTS
+        flags = self.con.URDF_USE_SELF_COLLISION | self.con.URDF_USE_SELF_COLLISION_INCLUDE_PARENT | self.con.URDF_USE_INERTIA_FROM_FILE
 
         self.robotId = self.con.loadURDF(self.robot_urdf_path, self.start_pos, self.start_orientation, useFixedBase=True, flags=flags)
         self.num_joints = self.con.getNumJoints(self.robotId)
@@ -76,10 +76,12 @@ class LoadRobot:
         return None
 
     def set_joint_positions(self, joint_positions):
+        joint_positions = list(joint_positions)
         for i, joint_idx in enumerate(self.controllable_joint_idx):
             self.con.setJointMotorControl2(self.robotId, joint_idx, self.con.POSITION_CONTROL, joint_positions[i])
 
     def reset_joint_positions(self, joint_positions):
+        joint_positions = list(joint_positions)
         for i, joint_idx in enumerate(self.controllable_joint_idx):
             self.con.resetJointState(self.robotId, joint_idx, joint_positions[i])
             self.con.stepSimulation()
@@ -123,7 +125,7 @@ class LoadRobot:
 
         return False
     
-    def inverse_kinematics(self, pose, pos_tol=1e-4, rest_config=None):
+    def inverse_kinematics(self, pose, pos_tol=1e-4, rest_config=None, max_iter=100):
         if rest_config is None:
             rest_config = self.home_config
 
@@ -146,7 +148,8 @@ class LoadRobot:
                 upperLimits=self.upper_limits,
                 jointRanges=self.joint_ranges,
                 restPoses=rest_config,
-                residualThreshold=pos_tol
+                residualThreshold=pos_tol,
+                maxNumIterations=max_iter
                 )
         else:
             joint_positions = self.con.calculateInverseKinematics(
@@ -157,26 +160,54 @@ class LoadRobot:
                 upperLimits=self.upper_limits,
                 jointRanges=self.joint_ranges,
                 restPoses=rest_config,
-                residualThreshold=pos_tol
+                residualThreshold=pos_tol,
+                maxNumIterations=max_iter
                 )
         return joint_positions
     
-    def minimize_angle_change(self, start_angle, end_angle):
-        """
-        Finds the shortest path between start_angle and end_angle, considering
-        the wrapping behavior of angles within [-2pi, 2pi].
+    def quaternion_angle_difference(self, q1, q2):
+        # Compute the quaternion representing the relative rotation
+        q1_conjugate = q1 * np.array([1, -1, -1, -1])  # Conjugate of q1
+        q_relative = self.con.multiplyTransforms([0, 0, 0], q1_conjugate, [0, 0, 0], q2)[1]
+        # The angle of rotation (in radians) is given by the arccos of the w component of the relative quaternion
+        angle = 2 * np.arccos(np.clip(q_relative[0], -1.0, 1.0))
+        return angle
+    
+    def check_pose_within_tolerance(self, final_position, final_orientation, target_position, target_orientation, pos_tolerance, ori_tolerance):
+        pos_diff = np.linalg.norm(np.array(final_position) - np.array(target_position))
+        ori_diff = np.pi - self.quaternion_angle_difference(np.array(target_orientation), np.array(final_orientation))
+        return pos_diff <= pos_tolerance and np.abs(ori_diff) <= ori_tolerance
+    
+    def get_jacobian(self, joint_positions):
+        joint_positions = list(joint_positions)
+        zero_vec = [0.0] * len(joint_positions)
+        jac_t, jac_r = self.con.calculateJacobian(self.robotId, self.end_effector_index, [0, 0, 0], joint_positions, zero_vec, zero_vec)
+        jacobian = np.vstack((jac_t, jac_r))
+        return jacobian
+    
+    def jacobian_viz(self, jacobian, end_effector_pos):
+        # Visualization of the Jacobian columns
+        num_columns = jacobian.shape[1]
+        colors = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (1, 0, 1), (0, 1, 1)]  # Different colors for each column
+        for i in range(num_columns):
+            vector = jacobian[:, i]
+            start_point = end_effector_pos
+            end_point = start_point + 0.3 * vector[:3]  # Scale the vector for better visualization
+            self.con.addUserDebugLine(start_point, end_point, colors[i % len(colors)], 2)
 
-        Parameters:
-        - start_angle: float, the starting joint angle
-        - end_angle: float, the desired final joint angle
+    def calculate_manipulability(self, joint_positions, planar=True, visualize_jacobian=False):
+        jacobian = self.get_jacobian(joint_positions)
+        
+        if planar:
+            jac_t = np.array(jac_t)[1:3]
+            jac_r = np.array(jac_r)[0]
+            jacobian = np.vstack((jac_t, jac_r))
 
-        Returns:
-        - adjusted_end_angle: float, the adjusted end_angle to minimize the movement
-        """
-        # Normalize the angles to the range [-pi, pi]
-        delta = (end_angle - start_angle + np.pi) % (2 * np.pi) - np.pi
-        # return start_angle + delta
-        return delta
+        if visualize_jacobian:
+            end_effector_pos, _ = self.get_link_state(self.end_effector_index)
+            self.jacobian_viz(jacobian, end_effector_pos)
+
+        return np.sqrt(np.linalg.det(jacobian @ jacobian.T))
 
     def shortest_angular_distance(self, start_configuration, end_configuration):
         """
@@ -633,48 +664,3 @@ class LoadRobot:
                 return None
 
         return joint_path
-    
-    def quaternion_angle_difference(self, q1, q2):
-        # Compute the quaternion representing the relative rotation
-        q1_conjugate = q1 * np.array([1, -1, -1, -1])  # Conjugate of q1
-        q_relative = self.con.multiplyTransforms([0, 0, 0], q1_conjugate, [0, 0, 0], q2)[1]
-        # The angle of rotation (in radians) is given by the arccos of the w component of the relative quaternion
-        angle = 2 * np.arccos(np.clip(q_relative[0], -1.0, 1.0))
-        return angle
-    
-    def check_pose_within_tolerance(self, final_position, final_orientation, target_position, target_orientation, pos_tolerance, ori_tolerance):
-        pos_diff = np.linalg.norm(np.array(final_position) - np.array(target_position))
-        ori_diff = np.pi - self.quaternion_angle_difference(np.array(target_orientation), np.array(final_orientation))
-        return pos_diff <= pos_tolerance and np.abs(ori_diff) <= ori_tolerance
-    
-    def get_jacobian(self, joint_positions):
-        zero_vec = [0.0] * len(joint_positions)
-        jac_t, jac_r = self.con.calculateJacobian(self.robotId, self.end_effector_index, [0, 0, 0], joint_positions, zero_vec, zero_vec)
-        jacobian = np.vstack((jac_t, jac_r))
-        return jacobian
-    
-    def jacobian_viz(self, jacobian, end_effector_pos):
-        # Visualization of the Jacobian columns
-        num_columns = jacobian.shape[1]
-        colors = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (1, 0, 1), (0, 1, 1)]  # Different colors for each column
-        for i in range(num_columns):
-            vector = jacobian[:, i]
-            start_point = end_effector_pos
-            end_point = start_point + 0.3 * vector[:3]  # Scale the vector for better visualization
-            self.con.addUserDebugLine(start_point, end_point, colors[i % len(colors)], 2)
-
-    def calculate_manipulability(self, joint_positions, planar=True, visualize_jacobian=False):
-        zero_vec = [0.0] * len(joint_positions)
-        jac_t, jac_r = self.con.calculateJacobian(self.robotId, self.end_effector_index, [0, 0, 0], joint_positions, zero_vec, zero_vec)
-        jacobian = np.vstack((jac_t, jac_r))
-        
-        if planar:
-            jac_t = np.array(jac_t)[1:3]
-            jac_r = np.array(jac_r)[0]
-            jacobian = np.vstack((jac_t, jac_r))
-
-        if visualize_jacobian:
-            end_effector_pos, _ = self.get_link_state(self.end_effector_index)
-            self.jacobian_viz(jacobian, end_effector_pos)
-
-        return np.sqrt(np.linalg.det(jacobian @ jacobian.T))

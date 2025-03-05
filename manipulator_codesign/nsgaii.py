@@ -5,7 +5,7 @@ from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.visualization.scatter import Scatter
 from pymoo.optimize import minimize
 
-from .kinematic_chain import KinematicChainRTB, KinematicChainPyBullet
+from manipulator_codesign.kinematic_chain import KinematicChainRTB, KinematicChainPyBullet
 
 
 def decode_decision_vector(x, min_joints=2, max_joints=5):

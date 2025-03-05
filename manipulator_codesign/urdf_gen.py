@@ -1,8 +1,11 @@
 import os
+import manipulator_codesign
 import matplotlib.colors as mcolors
 import xml.etree.ElementTree as ET
 import tempfile
 import random
+from xml.dom import minidom
+import xml.dom.minidom
 
 
 class URDFGen:
@@ -14,6 +17,7 @@ class URDFGen:
             robot_name (str): The name of the robot.
             save_urdf_dir (str, optional): The directory where the URDF file will be saved. Defaults to 'urdf/'.
         """
+        # TODO: Add a cache clearing method for emptying the tmp/ dir
         self.robot = ET.Element('robot', name=robot_name)
 
         if save_urdf_dir is None:
@@ -44,6 +48,7 @@ class URDFGen:
         link = ET.Element('link', name=name)
         
         inertial = ET.SubElement(link, 'inertial')
+        mass = float(mass)
         ET.SubElement(inertial, 'mass', value=str(mass))
         ET.SubElement(inertial, 'inertia', **self.inertial_calculation(mass, link_len, link_width, type))
         
@@ -122,10 +127,18 @@ class URDFGen:
             file_path = f"{base}_{counter}{ext}"
             counter += 1
 
-        print(f"\nSaving new urdf to: {file_path}")
+        # Convert ElementTree to a string
+        rough_string = ET.tostring(self.robot, encoding='utf-8')
 
-        tree = ET.ElementTree(self.robot)
-        tree.write(file_path, xml_declaration=True, encoding='utf-8', method='xml')
+        # Pretty-print using minidom
+        reparsed = minidom.parseString(rough_string)
+        pretty_xml = reparsed.toprettyxml(indent="    ")
+
+        # Write the formatted XML to the file
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(pretty_xml)
+
+        print(f"\nSaved new urdf to: {file_path}")
 
     def save_temp_urdf(self):
         """
@@ -136,9 +149,11 @@ class URDFGen:
         Returns:
             str: The path of the saved temporary URDF file.
         """
-        tree = ET.ElementTree(self.robot)
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".urdf") as tmpfile:
-            tree.write(tmpfile.name, xml_declaration=True, encoding='utf-8', method='xml')
+        rough_string = ET.tostring(self.robot, encoding="utf-8")
+        pretty_string = xml.dom.minidom.parseString(rough_string).toprettyxml(indent="  ")
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".urdf", mode="w", encoding="utf-8") as tmpfile:
+            tmpfile.write(pretty_string)
             return tmpfile.name
         
     def add_custom_gripper(self, parent, last_link_length):
@@ -167,10 +182,10 @@ class URDFGen:
         """
         # Create a probe end effector
         self.robot.append(self.create_joint('probe_joint', parent, 'probe_link', [0, 0, last_link_length, 0, 0, 0], 'fixed'))
-        self.robot.append(self.create_link('probe_link', link_len=0.1, link_width=0.01, mass=0.0, collision=False))
+        self.robot.append(self.create_link('probe_link', link_len=0.1, link_width=0.01, mass=1, collision=False))
 
         self.robot.append(self.create_joint('end_effector_joint', 'probe_link', 'end_effector', [0, 0, 0.1, 0, 0, 0], 'fixed'))
-        self.robot.append(self.create_link('end_effector', link_len=0, link_width=0, mass=0.0, collision=False))
+        self.robot.append(self.create_link('end_effector', link_len=0, link_width=0, mass=1, collision=False))
     
     def create_manipulator(self, axes, joint_types, link_lens, joint_lims, link_shape='cylinder', collision=False, gripper=False):
         """
@@ -202,7 +217,7 @@ class URDFGen:
                              link_len=base_link_size,
                              link_width=base_link_size,
                              link_height=base_link_size,
-                             mass=0.0,
+                             mass=1,
                              material='gray', 
                              color=[0.5, 0.5, 0.5, 1], 
                              collision=False))
@@ -235,7 +250,7 @@ class URDFGen:
                     self.create_link(ball_joint_link_name, 
                                     type='sphere', 
                                     link_len=0.1,
-                                    mass=0.0,
+                                    mass=1,
                                     origin=[0, 0, 0, 0, 0, 0], 
                                     material=color_name, 
                                     color=color_code, 
@@ -378,9 +393,9 @@ if __name__ == '__main__':
     # joint_types = [1, 1, 1, 1, 1]
     # link_lens = [0.5, 0.5, 0.5, 0.5, 0.5]
 
-    axes = ['y', 'x', 'x', 'x', 'y', 'x']
-    joint_types = [1, 1, 1, 1, 1, 1]
-    link_lens = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+    axes = ['y', 'x']
+    joint_types = [1, 1]
+    link_lens = [0.5, 0.5]
 
     joint_limit_prismatic = (-0.5, 0.5)
     joint_limit_revolute = (-3.14, 3.14)

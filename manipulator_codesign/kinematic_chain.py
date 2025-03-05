@@ -1,8 +1,11 @@
 import numpy as np
+from tabulate import tabulate
 import roboticstoolbox as rtb
 from spatialmath import SE3
-from .urdf_gen import URDFGen
-from .load_robot import LoadRobot
+from manipulator_codesign.urdf_gen import URDFGen
+from manipulator_codesign.load_robot import LoadRobot
+
+# TODO: How might the Energy Performance Index (EPI) bes used in a GA?
 
 # Base class with shared parameters and methods
 class KinematicChainBase:
@@ -61,10 +64,10 @@ class KinematicChainBase:
         joint types, joint axes, and link lengths.
         """
         print("\nKinematic Chain Description:")
-        print(f"  Number of Joints: {self.num_joints}")
-        print(f"  Joint Types: {self.joint_types}")
-        print(f"  Joint Axes: {self.joint_axes}")
-        print(f"  Link Lengths: {self.link_lengths}")
+        headers = ["Joint Number", "Joint Type", "Joint Axis", "Link Length"]
+        joint_types_mapped = [self.urdf_gen.map_joint_type(joint_types) for joint_types in self.joint_types]
+        table_data = zip(list(range(1, self.num_joints + 1)), joint_types_mapped, self.joint_axes, np.round(self.link_lengths, 3))
+        print(tabulate(table_data, headers=headers, tablefmt="grid", colalign=("center", "center", "center", "center")))
 
     def compute_fitness(self, target):
         """
@@ -109,19 +112,32 @@ class KinematicChainPyBullet(KinematicChainBase):
         """
         super().__init__(num_joints, joint_types, joint_axes, link_lengths, **kwargs)
         self.pyb_con = pyb_con
-        
+        self.ee_link_name = ee_link_name
+        self.urdf_path = None
+        self.robot = None
+
+    def build_robot(self):
         # Create a URDF for this chain.
         self.create_urdf()
         # Save a temporary URDF file to load the robot.
-        urdf_path = self.urdf_gen.save_temp_urdf()
-        
+        self.urdf_path = self.urdf_gen.save_temp_urdf()
+    
+    def load_robot(self):
         # Load the robot into PyBullet.
         self.robot = LoadRobot(self.pyb_con, 
-                               urdf_path, 
+                               self.urdf_path, 
                                start_pos=[0, 0, 0], 
                                start_orientation=self.pyb_con.getQuaternionFromEuler([0, 0, 0]),
                                home_config=[0] * self.num_joints,
-                               ee_link_name=ee_link_name)
+                               ee_link_name=self.ee_link_name)
+    
+    def initialize_robot(self):
+        """
+        A convenience method that builds and loads the robot.
+        """
+        self.build_robot()
+        self.load_robot()
+        return self
 
     def compute_fitness(self, target):
         """
@@ -141,20 +157,33 @@ class KinematicChainPyBullet(KinematicChainBase):
         float: The computed fitness value. A lower value indicates a better fit. If an error occurs during
                IK computation, a large fitness value (1e6) is returned.
         """
-        # Compute fitness by solving IK in PyBullet.
+        # Check if there is a target orientation (quaternion)
+        if len(target) == 2:
+            target_pos, target_quat = target
+        else:
+            target_pos = target
+            target_quat = None
+
+        # Initial reachability check
+        max_reach = np.sum(self.link_lengths)
+        target_distance = np.linalg.norm(target_pos)
+        if target_distance > max_reach:
+            # print('Unreachable target point')
+            return 1e6
+
         # TODO: how much tolerance should we allow?
         try:
-            joint_config = self.robot.inverse_kinematics(target, pos_tol=0.1)
+            joint_config = self.robot.inverse_kinematics(target, pos_tol=0.01)
         except Exception as e:
             print("IK Error:", e)
             return 1e6 
         self.robot.reset_joint_positions(joint_config)
         ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
 
-        if len(target) == 1:
-            error = np.linalg.norm(np.array(target) - np.array(ee_pos))
-        else:
+        if target_quat is not None:
             error = self.compute_pose_error(target, (ee_pos, ee_ori), weight_position=2.0, weight_orientation=0.25)
+        else:
+            error = np.linalg.norm(np.array(target) - np.array(ee_pos))
         return error
     
     def compute_motion_plan_fitness(self, pose_waypoints):
@@ -186,6 +215,56 @@ class KinematicChainPyBullet(KinematicChainBase):
                 ee_pose = (ee_pos, ee_ori)
                 error += self.compute_pose_error(pose_waypoints[i], ee_pose)
             return error
+    
+    def compute_global_conditioning_index(self, num_samples=100, epsilon=1e-6):
+        """
+        Computes the Global Conditioning Index (GCI) for the kinematic chain.
+
+        The GCI is calculated as the average of the inverse of the condition number 
+        of the Jacobian over a set of sampled joint configurations.
+
+        Args:
+            num_samples (int): Number of random joint configurations to sample.
+            epsilon (float): Small value to replace near-zero singular values.
+
+        Returns:
+            float: The computed GCI value. Higher values indicate better conditioning.
+        """
+        gci_values = []
+
+        for _ in range(num_samples):
+            # Generate a random valid joint configuration within limits
+            random_config = np.array([
+                np.random.uniform(*self.joint_limits[i]) for i in range(self.num_joints)
+            ])
+
+            # Set the robot to this configuration
+            self.robot.reset_joint_positions(list(random_config))
+
+            # Compute the Jacobian
+            J = np.array(self.robot.get_jacobian(list(random_config)))
+
+            if J.size == 0:
+                continue  # Skip if Jacobian computation fails
+
+            # Compute singular values (axes lengths of the manipulability ellipsoid)
+            _, singular_values, _ = np.linalg.svd(J)
+
+            # Replace near-zero singular values with epsilon to avoid division issues
+            singular_values = np.maximum(singular_values, epsilon)
+
+            # Compute the condition number (k = sigma_max / sigma_min) - Could also use np.linalg.cond(J)
+            cond_num = np.max(singular_values) / np.min(singular_values)
+
+            # Compute GCI contribution from this sample (square of the inverse of condition number)
+            # Note: Not squaring this value is also acceptable. Squaring can simplify algebra, but might not be necessary here
+            gci_values.append((1.0 / cond_num) ** 2)
+
+        if not gci_values:
+            return 0.0  # Return 0 if no valid configurations were found
+
+        # Compute and return the mean GCI
+        return np.mean(gci_values)
 
     @staticmethod        
     def compute_pose_error(target_pose, actual_pose, weight_position=1.0, weight_orientation=1.0):

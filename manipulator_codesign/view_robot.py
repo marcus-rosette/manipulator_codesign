@@ -1,9 +1,9 @@
 import numpy as np
 import time
 from scipy.spatial.transform import Rotation
-from .pyb_utils import PybUtils
-from .load_objects import LoadObjects
-from .load_robot import LoadRobot
+from manipulator_codesign.pyb_utils import PybUtils
+from manipulator_codesign.load_objects import LoadObjects
+from manipulator_codesign.load_robot import LoadRobot
 
 
 class ViewRobot:
@@ -127,7 +127,7 @@ class ViewRobot:
 
             
 if __name__ == "__main__":
-    robot_urdf_path = "/home/marcus/IMML/manipulator_codesign/manipulator_codesign/urdf/robots/best_chain_pyb_GA_15poses_full_collision.urdf"
+    robot_urdf_path = "/home/marcus/IMML/manipulator_codesign/manipulator_codesign/urdf/robots/best_chain_7.urdf"
     ee_link_name = 'end_effector' # for best_chain
     # robot_urdf_path = '/home/marcus/IMML/manipulator_codesign/manipulator_codesign/urdf/robots/ur5e/ur5e.urdf'
     # ee_link_name = 'gripper_link' # for ur5e

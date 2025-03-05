@@ -3,4 +3,12 @@ figures/
 point_clouds/
 meshes/
 
-src/manipulator_codesign/__pycache__
+__pycache__*
+*.pyc
+*.pyo
+*.pyd
+
+best_chain*.urdf
+test_robot*.urdf
+
+.coverage

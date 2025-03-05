@@ -26,4 +26,5 @@ dependencies = [
     "open3d",
     "spatialmath-python",
     "roboticstoolbox-python",
+    "tabulate",
 ]
