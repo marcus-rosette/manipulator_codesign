@@ -195,18 +195,8 @@ class LoadRobot:
             end_point = start_point + 0.3 * vector[:3]  # Scale the vector for better visualization
             self.con.addUserDebugLine(start_point, end_point, colors[i % len(colors)], 2)
 
-    def calculate_manipulability(self, joint_positions, planar=True, visualize_jacobian=False):
+    def calculate_manipulability(self, joint_positions):
         jacobian = self.get_jacobian(joint_positions)
-        
-        if planar:
-            jac_t = np.array(jac_t)[1:3]
-            jac_r = np.array(jac_r)[0]
-            jacobian = np.vstack((jac_t, jac_r))
-
-        if visualize_jacobian:
-            end_effector_pos, _ = self.get_link_state(self.end_effector_index)
-            self.jacobian_viz(jacobian, end_effector_pos)
-
         return np.sqrt(np.linalg.det(jacobian @ jacobian.T))
 
     def shortest_angular_distance(self, start_configuration, end_configuration):
