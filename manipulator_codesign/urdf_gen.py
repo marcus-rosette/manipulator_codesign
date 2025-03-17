@@ -1,5 +1,4 @@
 import os
-import manipulator_codesign
 import matplotlib.colors as mcolors
 import xml.etree.ElementTree as ET
 import tempfile
@@ -21,8 +20,8 @@ class URDFGen:
         self.robot = ET.Element('robot', name=robot_name)
 
         if save_urdf_dir is None:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            self.save_urdf_dir = os.path.join(current_dir, 'urdf/robots/')
+            current_working_directory = os.getcwd()
+            self.save_urdf_dir = os.path.join(current_working_directory, 'manipulator_codesign/urdf/robots/')
         else:
             self.save_urdf_dir = save_urdf_dir
     
@@ -238,8 +237,17 @@ class URDFGen:
                 link_width = 0.05
 
             if joint_type == 'revolute':
-                ball_joint_name = f'ball_joint{i}'
-                ball_joint_link_name = f'ball_joint_link{i}'
+                if axis == '1 0 0':
+                    joint_viz_rot = [0, 1.57, 0]
+                elif axis == '0 1 0':
+                    joint_viz_rot = [1.57, 0, 0]
+                else:
+                    joint_viz_rot = [0, 0, 0]
+                joint_viz_origin = [0, 0, 0]
+                joint_viz_origin.extend(joint_viz_rot)
+
+                ball_joint_name = f'joint_viz{i}'
+                ball_joint_link_name = f'joint_viz_link{i}'
                 self.robot.append(
                     self.create_joint(ball_joint_name, 
                                     parent=parent_name, 
@@ -248,10 +256,11 @@ class URDFGen:
                                     origin=[0, 0, parent_length, 0, 0, 0]))
                 self.robot.append(
                     self.create_link(ball_joint_link_name, 
-                                    type='sphere', 
-                                    link_len=0.1,
+                                    type='cylinder', 
+                                    link_len=0.125,
+                                    link_width=0.06,
                                     mass=1,
-                                    origin=[0, 0, 0, 0, 0, 0], 
+                                    origin=joint_viz_origin, 
                                     material=color_name, 
                                     color=color_code, 
                                     collision=False))

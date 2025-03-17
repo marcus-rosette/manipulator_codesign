@@ -35,7 +35,7 @@ class LoadRobot:
         """ Initialize robot
         """
         assert self.robotId is None
-        flags = self.con.URDF_USE_SELF_COLLISION | self.con.URDF_USE_SELF_COLLISION_INCLUDE_PARENT | self.con.URDF_USE_INERTIA_FROM_FILE
+        flags = self.con.URDF_USE_SELF_COLLISION | self.con.URDF_USE_INERTIA_FROM_FILE #| self.con.URDF_USE_SELF_COLLISION_INCLUDE_PARENT 
 
         self.robotId = self.con.loadURDF(self.robot_urdf_path, self.start_pos, self.start_orientation, useFixedBase=True, flags=flags)
         self.num_joints = self.con.getNumJoints(self.robotId)
@@ -79,6 +79,12 @@ class LoadRobot:
         joint_positions = list(joint_positions)
         for i, joint_idx in enumerate(self.controllable_joint_idx):
             self.con.setJointMotorControl2(self.robotId, joint_idx, self.con.POSITION_CONTROL, joint_positions[i])
+            self.con.stepSimulation()
+    
+    def set_joint_positions2(self, joint_positions):
+        joint_positions = list(joint_positions)
+        self.con.setJointMotorControlArray(self.robotId, self.controllable_joint_idx, self.con.POSITION_CONTROL, targetPositions=joint_positions)
+        self.con.stepSimulation()
 
     def reset_joint_positions(self, joint_positions):
         joint_positions = list(joint_positions)
@@ -89,8 +95,7 @@ class LoadRobot:
     def set_joint_path(self, joint_path):
         # Vizualize the interpolated positions
         for config in joint_path:
-            self.con.setJointMotorControlArray(self.robotId, self.controllable_joint_idx, self.con.POSITION_CONTROL, targetPositions=config)
-            self.con.stepSimulation()
+            self.set_joint_positions2(config)
             time.sleep(1/25)
 
     def get_joint_positions(self):
@@ -165,6 +170,11 @@ class LoadRobot:
                 )
         return joint_positions
     
+    def inverse_dynamics(self, joint_positions, joint_velocities=None, joint_accelerations=None):
+        joint_velocities = joint_velocities or [0.0] * len(joint_positions)
+        joint_accelerations = joint_accelerations or [0.0] * len(joint_positions)
+        return self.con.calculateInverseDynamics(self.robotId, list(joint_positions), list(joint_velocities), list(joint_accelerations))
+
     def quaternion_angle_difference(self, q1, q2):
         # Compute the quaternion representing the relative rotation
         q1_conjugate = q1 * np.array([1, -1, -1, -1])  # Conjugate of q1

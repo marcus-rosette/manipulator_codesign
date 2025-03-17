@@ -1,11 +1,11 @@
-import numpy as np
+import atexit
 import pybullet as p
 import pybullet_data
 from pybullet_utils import bullet_client as bc
 
 
 class PybUtils:
-    def __init__(self, env, renders: bool = False) -> None:
+    def __init__(self, renders: bool = False) -> None:
         """ Base class for the PyBullet Client
 
         Args:
@@ -13,7 +13,6 @@ class PybUtils:
             renders (bool, optional): visualize the env with the PyBullet GUI. Defaults to False.
         """
         self.renders = renders
-        self.env = env
         self.step_time = 1 / 240
 
         self.con = None
@@ -36,6 +35,8 @@ class PybUtils:
 
         self.con.resetDebugVisualizerCamera(cameraDistance=2, cameraYaw=90, cameraPitch=-10,
                                             cameraTargetPosition=[0, 0.75, 0.75])
+        
+        atexit.register(self.disconnect)
 
     def disable_gravity(self):
         self.con.setGravity(0, 0, 0)

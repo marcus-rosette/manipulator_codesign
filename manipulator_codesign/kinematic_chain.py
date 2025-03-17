@@ -47,7 +47,7 @@ class KinematicChainBase:
         This method uses the URDF generator to create a URDF file for the manipulator based on
         the provided joint axes, joint types, link lengths, and joint limits.
         """
-        self.urdf_gen.create_manipulator(self.joint_axes, self.joint_types, self.link_lengths, self.joint_limits)
+        self.urdf_gen.create_manipulator(self.joint_axes, self.joint_types, self.link_lengths, self.joint_limits, collision=True)
     
     def save_urdf(self, filename):
         """
@@ -116,6 +116,10 @@ class KinematicChainPyBullet(KinematicChainBase):
         self.urdf_path = None
         self.robot = None
 
+        self.mean_pose_error = None
+        self.mean_torque = None
+        self.target_joint_positions = None
+
     def build_robot(self):
         # Create a URDF for this chain.
         self.create_urdf()
@@ -138,8 +142,23 @@ class KinematicChainPyBullet(KinematicChainBase):
         self.build_robot()
         self.load_robot()
         return self
+    
+    def compute_chain_metrics(self, targets):
+        total_pose_error = 0.0
+        total_torque = 0.0
+        target_joint_positions = []
+        for target in targets:
+            pose_error, joint_positions = self.compute_pose_fitness(target)
+            total_pose_error += pose_error
+            target_joint_positions.append(joint_positions)
+        self.mean_pose_error = total_pose_error / len(targets)
+        self.target_joint_positions = target_joint_positions
+        
+        for joint_positions in target_joint_positions:
+            total_torque += self.compute_gravity_torque_magnitute(joint_positions)
+        self.mean_torque = total_torque / len(target_joint_positions)
 
-    def compute_fitness(self, target):
+    def compute_pose_fitness(self, target):
         """
         Compute the fitness of the robot's configuration by solving the inverse kinematics (IK) problem.
 
@@ -164,19 +183,21 @@ class KinematicChainPyBullet(KinematicChainBase):
             target_pos = target
             target_quat = None
 
+        # TODO: If returning joint positoins, what should be done if IK fails?
+
         # Initial reachability check
         max_reach = np.sum(self.link_lengths)
         target_distance = np.linalg.norm(target_pos)
         if target_distance > max_reach:
             # print('Unreachable target point')
-            return 1e6
+            return 1e6, [0.0] * self.num_joints
 
         # TODO: how much tolerance should we allow?
         try:
             joint_config = self.robot.inverse_kinematics(target, pos_tol=0.01)
         except Exception as e:
             print("IK Error:", e)
-            return 1e6 
+            return 1e6, [0.0] * self.num_joints
         self.robot.reset_joint_positions(joint_config)
         ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
 
@@ -184,7 +205,7 @@ class KinematicChainPyBullet(KinematicChainBase):
             error = self.compute_pose_error(target, (ee_pos, ee_ori), weight_position=2.0, weight_orientation=0.25)
         else:
             error = np.linalg.norm(np.array(target) - np.array(ee_pos))
-        return error
+        return error, joint_config
     
     def compute_motion_plan_fitness(self, pose_waypoints):
         """
@@ -265,6 +286,24 @@ class KinematicChainPyBullet(KinematicChainBase):
 
         # Compute and return the mean GCI
         return np.mean(gci_values)
+    
+    def compute_gravity_torque_magnitute(self, joint_positions):
+        """
+        Compute the magnitude of the gravity torque for a given joint configuration.
+
+        Returns:
+            float: The magnitude of the gravity torque.
+        """
+        # Set the joint positions
+        self.robot.reset_joint_positions(joint_positions)
+
+        # Compute the gravity torque
+        gravity_torque = self.robot.inverse_dynamics(joint_positions)
+
+        # Compute the magnitude of the gravity torque
+        gravity_torque_magnitude = np.linalg.norm(gravity_torque)
+
+        return gravity_torque_magnitude
 
     @staticmethod        
     def compute_pose_error(target_pose, actual_pose, weight_position=1.0, weight_orientation=1.0):
