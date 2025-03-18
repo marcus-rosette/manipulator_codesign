@@ -148,12 +148,22 @@ class URDFGen:
         Returns:
             str: The path of the saved temporary URDF file.
         """
+        # Define the directory for temporary URDF files
+        tmp_dir = os.path.join(tempfile.gettempdir(), "urdf")
+        os.makedirs(tmp_dir, exist_ok=True)  # Ensure the directory exists
+
+        # Generate a unique file name
+        tmp_file_path = os.path.join(tmp_dir, next(tempfile._get_candidate_names()) + ".urdf")
+
+        # Convert URDF to pretty XML
         rough_string = ET.tostring(self.robot, encoding="utf-8")
         pretty_string = xml.dom.minidom.parseString(rough_string).toprettyxml(indent="  ")
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".urdf", mode="w", encoding="utf-8") as tmpfile:
+        # Write to the file
+        with open(tmp_file_path, "w", encoding="utf-8") as tmpfile:
             tmpfile.write(pretty_string)
-            return tmpfile.name
+            
+        return tmp_file_path
         
     def add_custom_gripper(self, parent, last_link_length):
         # TODO: Need to update functionality for changing shape_dim to just the link lengths

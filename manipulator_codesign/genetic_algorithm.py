@@ -5,7 +5,7 @@ from manipulator_codesign.kinematic_chain import KinematicChainRTB, KinematicCha
 
 
 class GeneticAlgorithm:
-    def __init__(self, target_positions, backend='rtb', save_urdf_dir=None, max_num_joints=5, link_len_bounds=(0.05, 1.0),
+    def __init__(self, target_positions, backend='pybullet', save_urdf_dir=None, max_num_joints=5, link_len_bounds=(0.05, 1.0),
                  population_size=20, generations=100, mutation_rate=0.3, crossover_rate=0.7, joint_penalty_weight=0.1, renders=False):
         """
         Initialize the genetic algorithm for manipulator codesign.
@@ -98,13 +98,9 @@ class GeneticAlgorithm:
         torque_norm = 100.0  # Normalization factor for gravity torque magnitude (expected max torque)
 
         # ** Penalty for pose error **:
-        mean_pose_error = 0
-        target_joint_positions = []
-        for target in self.target_positions:
-            pose_error, joint_positions = chain.compute_pose_fitness(target)
-            mean_pose_error += pose_error
-            target_joint_positions.append(joint_positions)
-        mean_pose_error /= len(self.target_positions)
+        pose_errors, target_joint_positions = zip(*[chain.compute_pose_fitness(target) for target in self.target_positions])
+        mean_pose_error = np.mean(pose_errors)
+
         normalized_pose_error = (mean_pose_error / pose_error_norm)**2 # The square error on pose penalizes large errors more drastically
 
         # ** Penalty for number of joints**: Encourage fewer joints by adding a cost term
@@ -112,19 +108,17 @@ class GeneticAlgorithm:
         normalized_joint_penalty = joint_penalty / self.max_num_joints
 
         # ** Gravity Torque Magnitude Penalty **
-        mean_torque_magnitude = 0
-        for joint_positions in target_joint_positions:
-            gravity_torque_magnitude = chain.compute_gravity_torque_magnitute(joint_positions)
-            mean_torque_magnitude += gravity_torque_magnitude
-        mean_torque_magnitude /= len(target_joint_positions)
+        mean_torque_magnitude = np.mean([
+            chain.compute_gravity_torque_magnitute(jp) for jp in target_joint_positions
+        ])
         normalized_torque_penalty = (mean_torque_magnitude / torque_norm)**2  
 
         # ** Reward global conditioning numbers that are closer to 1 (Using an inverse function to penalize deviation from 1)
         conditioning_index = chain.compute_global_conditioning_index()
         conditioning_index_scaled = 1 / (1 + abs(conditioning_index - 1))
 
-        print(f"Pose Error: {np.round(mean_pose_error, 4)}, Joint Penalty: {np.round(joint_penalty, 4)}, "
-              f"Torque Penalty: {np.round(mean_torque_magnitude, 4)}, Conditioning Index: {np.round(conditioning_index, 4)}")
+        # print(f"Pose Error: {np.round(mean_pose_error, 4)}, Joint Penalty: {np.round(joint_penalty, 4)}, "
+        #       f"Torque Penalty: {np.round(mean_torque_magnitude, 4)}, Conditioning Index: {np.round(conditioning_index, 4)}")
         # print(f"Pose Error: {np.round(np.exp(-alpha * normalized_pose_error), 4)}, Joint Penalty: {np.round(np.exp(-beta * normalized_joint_penalty), 4)}, "
         #       f"Torque Penalty: {np.round(np.exp(-delta * normalized_torque_penalty), 4)}, Conditioning Index: {np.round(conditioning_index_scaled, 4)}")
 
@@ -153,8 +147,8 @@ class GeneticAlgorithm:
         """
         # Weights for each term
         alpha = 2.0  # Pose error penalty weight    
-        beta = 0.01   # Joint torque penalty weight
-        delta = 0.01  # Joint penalty weight
+        beta = 0.001   # Joint torque penalty weight
+        delta = 0.001  # Joint penalty weight
         gamma = 3.0  # Conditioning index reward weight
 
         # Dynamic normalization factors based on population trends
@@ -175,8 +169,8 @@ class GeneticAlgorithm:
         joint_penalty_scaled = np.exp(-delta * joint_penalty)  # Exponential decay for joint penalty
         conditioning_index_scaled = np.exp(-gamma * abs(conditioning_index - 1)) # Use an exponential decay to penalize deviation from 1
 
-        print(f"Pose Error: {np.round(normalized_pose_error_scaled, 4)}, Joint Penalty: {np.round(joint_penalty_scaled, 4)}, "
-          f"Torque Penalty: {np.round(normalized_torque_penalty_scaled, 4)}, Conditioning Index: {np.round(conditioning_index_scaled, 4)}")
+        # print(f"Pose Error: {np.round(normalized_pose_error_scaled, 4)}, Joint Penalty: {np.round(joint_penalty_scaled, 4)}, "
+        #   f"Torque Penalty: {np.round(normalized_torque_penalty_scaled, 4)}, Conditioning Index: {np.round(conditioning_index_scaled, 4)}")
     
         fitness_score = (
             normalized_pose_error_scaled *
@@ -230,8 +224,7 @@ class GeneticAlgorithm:
             child_joint_axes.append(joint_axis)
             child_link_lengths.append(link_length)
 
-        chain = self._chain_factory(child_num_joints, child_joint_types, child_joint_axes, child_link_lengths)
-        return chain.initialize_robot()
+        return self._chain_factory(child_num_joints, child_joint_types, child_joint_axes, child_link_lengths)
     
     def mutate(self, chain):
         """
@@ -281,9 +274,7 @@ class GeneticAlgorithm:
             new_link_lengths.append(random.uniform(*self.link_lengths_bounds))
             new_num_joints += 1
 
-        # Create a new mutated chain using the modified parameters
-        chain = self._chain_factory(new_num_joints, new_joint_types, new_joint_axes, new_link_lengths)
-        return chain.initialize_robot()
+        return self._chain_factory(new_num_joints, new_joint_types, new_joint_axes, new_link_lengths)
     
     def sort_population(self, population):
         """
@@ -297,8 +288,53 @@ class GeneticAlgorithm:
             list: A list of fitness scores corresponding to the sorted kinematic chains.
         """
         # Compute fitness for each chain and store the pose errors and torques
-        chain_fitness = [(chain, self.fitness(chain)) for chain in population]
+        chain_fitness = []
+        for chain in population:
+            if not chain.is_built:
+                chain.build_robot()
+
+            chain.load_robot()  # Load the robot into the simulation
+
+            fitness_score = self.fitness(chain)
+            chain_fitness.append((chain, fitness_score))
+
+            self.pyb.con.resetSimulation()
+            self.pyb.enable_gravity()
         
+        # Sort population based on fitness (higher fitness is better)
+        chain_fitness.sort(key=lambda x: x[1], reverse=True)
+        population = [fs[0] for fs in chain_fitness]
+        fitness_scores = [fs[1] for fs in chain_fitness]
+        return population, fitness_scores
+    
+    def sort_population2(self, population):
+        """
+        Score the population of kinematic chains based on their fitness scores.
+        
+        Args:
+            population (list): A list of kinematic chain objects to be scored.
+        
+        Returns:
+            list: A list of fitness scores corresponding to each kinematic chain in the population.
+        """
+        # Compute fitness for each chain and store the pose errors and torques
+        chain_fitness = []
+        for chain in population:
+            if not chain.is_built:
+                chain.build_robot()
+
+            chain.load_robot()  # Load the robot into the simulation
+
+            chain.compute_chain_metrics(self.target_positions)
+            self.population_pose_errors.append(chain.mean_pose_error)
+            self.population_torques.append(chain.mean_torque)
+
+            fitness_score = self.fitness2(chain)
+            chain_fitness.append((chain, fitness_score))
+
+            self.pyb.con.resetSimulation()
+            self.pyb.enable_gravity()
+
         # Sort population based on fitness (higher fitness is better)
         chain_fitness.sort(key=lambda x: x[1], reverse=True)
         population = [fs[0] for fs in chain_fitness]
@@ -316,22 +352,13 @@ class GeneticAlgorithm:
             - total_iterations (int): The total number of generations processed.
         """
         # Generate and initialize the initial population of kinematic chains
-        population = [self.generate_random_chain().initialize_robot() for _ in range(self.population_size)]
+        population = [self.generate_random_chain() for _ in range(self.population_size)]
         total_chains_generated = self.population_size
         
         for gen in range(self.generations + 1):
             # At the beginning of each generation
             self.population_pose_errors = []
             self.population_torques = []
-
-            # Refresh robot states at the beginning of each generation
-            for chain in population:
-                chain.load_robot()
-
-                # # Compute fitness for each chain and store the pose errors and torques
-                # chain.compute_chain_metrics(self.target_positions)
-                # self.population_pose_errors.append(chain.mean_pose_error)
-                # self.population_torques.append(chain.mean_torque)
 
             # Sort population based on fitness (higher error is better)
             population, fitness_scores = self.sort_population(population)
@@ -343,25 +370,30 @@ class GeneticAlgorithm:
                 break
             
             # Keep the top 30% chains and generate new ones
-            top_25_percent = max(1, int(self.population_size * 0.3))
-            new_population = population[:top_25_percent]
-            
-            # Generate new offspring until the population is replenished
-            while len(new_population) < self.population_size:
-                # Select two parents from the top-performing individuals
-                parent1, parent2 = random.sample(new_population, 2)
+            top_percent = max(1, int(self.population_size * 0.3))
+            top_population = population[:top_percent]
+            new_population = top_population.copy()
 
-                # Use the crossover rate to decide whether to crossover or simply clone a parent
-                child = self.crossover(parent1, parent2) if random.random() < self.crossover_rate else parent1
+            # Determine how many offspring you need
+            num_offspring = self.population_size - len(top_population)
 
-                # Mutate the child further
+            # Precompute parent indices and crossover decisions
+            parent_indices = np.random.randint(0, len(top_population), size=(num_offspring, 2))
+            do_crossover = np.random.rand(num_offspring) < self.crossover_rate
+
+            # Generate new offspring
+            for i, (idx1, idx2) in enumerate(parent_indices):
+                parent1 = top_population[idx1]
+                parent2 = top_population[idx2]
+                if do_crossover[i]:
+                    child = self.crossover(parent1, parent2)
+                else:
+                    child = parent1  # Clone parent1 if no crossover
                 child = self.mutate(child)
                 new_population.append(child)
                 total_chains_generated += 1
             
             population = new_population
-            self.pyb.con.resetSimulation()
-            self.pyb.enable_gravity()
 
         best_chain = population[0]
         best_chain.save_urdf('best_chain')
@@ -389,31 +421,8 @@ if __name__ == '__main__':
         [-0.3, 0.7, 1.2]
     ]
 
-    target_orientations = [
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 90, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat()
-    ]
-    # target_poses = list(zip(target_positions, target_orientations))
     target_poses = np.array(target_positions)
 
-    # # To run with the Robotics Toolbox backend:
-    # ga_rtb = GeneticAlgorithm(target_positions, backend='rtb', population_size=20, generations=20)
-    # best_chain, total_generated, total_iters = ga_rtb.run(error_threshold=0.02)
-    
-    # To run with the PyBullet backend, ensure that your PyBullet connection is set up:
     save_urdf_dir = '/home/marcus/IMML/manipulator_codesign/manipulator_codesign/urdf/robots/'
 
     ga_pyb = GeneticAlgorithm(target_poses, save_urdf_dir=save_urdf_dir, backend='pybullet', 
