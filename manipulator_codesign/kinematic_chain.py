@@ -11,7 +11,7 @@ from manipulator_codesign.load_robot import LoadRobot
 class KinematicChainBase:
     def __init__(self, num_joints, joint_types, joint_axes, link_lengths, 
                  robot_name='silly_robot', save_urdf_dir=None,
-                 joint_limit_prismatic=(-0.5, 0.5), joint_limit_revolute=(-np.pi, np.pi)):
+                 joint_limit_prismatic=(-0.5, 0.5), joint_limit_revolute=(-2*np.pi, 2*np.pi)):
         """
         Initialize the kinematic chain for the robot.
 
@@ -141,21 +141,10 @@ class KinematicChainPyBullet(KinematicChainBase):
         self.is_loaded = True
     
     def compute_chain_metrics(self, targets):
-        # total_pose_error = 0.0
-        # total_torque = 0.0
-        # target_joint_positions = []
-        # for target in targets:
-        #     pose_error, joint_positions = self.compute_pose_fitness(target)
-        #     total_pose_error += pose_error
-        #     target_joint_positions.append(joint_positions)
-        # self.mean_pose_error = total_pose_error / len(targets)
-        # self.target_joint_positions = target_joint_positions
+        # Compute the mean pose error and mean torque for the given targets.
         pose_errors, self.target_joint_positions = zip(*[self.compute_pose_fitness(target) for target in targets])
         self.mean_pose_error = np.mean(pose_errors)
-        
-        # for joint_positions in target_joint_positions:
-        #     total_torque += self.compute_gravity_torque_magnitute(joint_positions)
-        # self.mean_torque = total_torque / len(target_joint_positions)
+
         self.mean_torque = np.mean([self.compute_gravity_torque_magnitute(joint_positions) for joint_positions in self.target_joint_positions])
 
     def compute_pose_fitness(self, target):
@@ -198,7 +187,11 @@ class KinematicChainPyBullet(KinematicChainBase):
         except Exception as e:
             print("IK Error:", e)
             return 1e6, [0.0] * self.num_joints
-        self.robot.reset_joint_positions(joint_config)
+        # Reset the robot to home position and set the joint configuration
+        self.robot.set_joint_configuration(self.robot.home_config)
+        self.robot.set_joint_configuration(joint_config)
+
+        # Get the end-effector position and orientation at the target joint configuration
         ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
 
         if target_quat is not None:

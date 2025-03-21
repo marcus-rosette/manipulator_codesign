@@ -1,0 +1,310 @@
+<?xml version="1.0" ?>
+<robot name="test_robot">
+    <link name="base_link">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.010416666666666666" iyy="0.010416666666666666" izz="0.010416666666666666" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.25 0.25 0.25"/>
+            </geometry>
+            <material name="gray">
+                <color rgba="0.5 0.5 0.5 1"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="joint_viz0" type="fixed">
+        <parent link="base_link"/>
+        <child link="joint_viz_link0"/>
+        <origin xyz="0 0 0.125" rpy="0 0 0"/>
+    </joint>
+    <link name="joint_viz_link0">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.0022020833333333332" iyy="0.0022020833333333332" izz="0.0018" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder length="0.125" radius="0.06"/>
+            </geometry>
+            <material name="mediumturquoise">
+                <color rgba="0.2823529411764706 0.8196078431372549 0.8 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="joint0" type="revolute">
+        <parent link="base_link"/>
+        <child link="link0"/>
+        <origin xyz="0 0 0.125" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+        <limit lower="-3.14" upper="3.14" effort="10" velocity="1"/>
+    </joint>
+    <link name="link0">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.021458333333333333" iyy="0.021458333333333333" izz="0.0012500000000000002" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0.25" rpy="0 0 0"/>
+            <geometry>
+                <cylinder length="0.5" radius="0.05"/>
+            </geometry>
+            <material name="mediumturquoise">
+                <color rgba="0.2823529411764706 0.8196078431372549 0.8 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="joint_viz1" type="fixed">
+        <parent link="link0"/>
+        <child link="joint_viz_link1"/>
+        <origin xyz="0 0 0.5" rpy="0 0 0"/>
+    </joint>
+    <link name="joint_viz_link1">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.0022020833333333332" iyy="0.0022020833333333332" izz="0.0018" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 1.57 0"/>
+            <geometry>
+                <cylinder length="0.125" radius="0.06"/>
+            </geometry>
+            <material name="lightgray">
+                <color rgba="0.8274509803921568 0.8274509803921568 0.8274509803921568 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="joint1" type="revolute">
+        <parent link="link0"/>
+        <child link="link1"/>
+        <origin xyz="0 0 0.5" rpy="0 0 0"/>
+        <axis xyz="1 0 0"/>
+        <limit lower="-3.14" upper="3.14" effort="10" velocity="1"/>
+    </joint>
+    <link name="link1">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.021458333333333333" iyy="0.021458333333333333" izz="0.0012500000000000002" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0.25" rpy="0 0 0"/>
+            <geometry>
+                <cylinder length="0.5" radius="0.05"/>
+            </geometry>
+            <material name="lightgray">
+                <color rgba="0.8274509803921568 0.8274509803921568 0.8274509803921568 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="joint_viz2" type="fixed">
+        <parent link="link1"/>
+        <child link="joint_viz_link2"/>
+        <origin xyz="0 0 0.5" rpy="0 0 0"/>
+    </joint>
+    <link name="joint_viz_link2">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.0022020833333333332" iyy="0.0022020833333333332" izz="0.0018" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <cylinder length="0.125" radius="0.06"/>
+            </geometry>
+            <material name="lightskyblue">
+                <color rgba="0.5294117647058824 0.807843137254902 0.9803921568627451 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="joint2" type="revolute">
+        <parent link="link1"/>
+        <child link="link2"/>
+        <origin xyz="0 0 0.5" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="-3.14" upper="3.14" effort="10" velocity="1"/>
+    </joint>
+    <link name="link2">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.030625" iyy="0.030625" izz="0.0012500000000000002" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0.3" rpy="0 0 0"/>
+            <geometry>
+                <cylinder length="0.6" radius="0.05"/>
+            </geometry>
+            <material name="lightskyblue">
+                <color rgba="0.5294117647058824 0.807843137254902 0.9803921568627451 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="joint_viz3" type="fixed">
+        <parent link="link2"/>
+        <child link="joint_viz_link3"/>
+        <origin xyz="0 0 0.6" rpy="0 0 0"/>
+    </joint>
+    <link name="joint_viz_link3">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.0022020833333333332" iyy="0.0022020833333333332" izz="0.0018" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder length="0.125" radius="0.06"/>
+            </geometry>
+            <material name="yellow">
+                <color rgba="1.0 1.0 0.0 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="joint3" type="revolute">
+        <parent link="link2"/>
+        <child link="link3"/>
+        <origin xyz="0 0 0.6" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+        <limit lower="-3.14" upper="3.14" effort="10" velocity="1"/>
+    </joint>
+    <link name="link3">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.013958333333333336" iyy="0.013958333333333336" izz="0.0012500000000000002" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0.2" rpy="0 0 0"/>
+            <geometry>
+                <cylinder length="0.4" radius="0.05"/>
+            </geometry>
+            <material name="yellow">
+                <color rgba="1.0 1.0 0.0 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="joint_viz4" type="fixed">
+        <parent link="link3"/>
+        <child link="joint_viz_link4"/>
+        <origin xyz="0 0 0.4" rpy="0 0 0"/>
+    </joint>
+    <link name="joint_viz_link4">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.0022020833333333332" iyy="0.0022020833333333332" izz="0.0018" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 1.57 0"/>
+            <geometry>
+                <cylinder length="0.125" radius="0.06"/>
+            </geometry>
+            <material name="lavender">
+                <color rgba="0.9019607843137255 0.9019607843137255 0.9803921568627451 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="joint4" type="revolute">
+        <parent link="link3"/>
+        <child link="link4"/>
+        <origin xyz="0 0 0.4" rpy="0 0 0"/>
+        <axis xyz="1 0 0"/>
+        <limit lower="-3.14" upper="3.14" effort="10" velocity="1"/>
+    </joint>
+    <link name="link4">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.008125" iyy="0.008125" izz="0.0012500000000000002" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0.15" rpy="0 0 0"/>
+            <geometry>
+                <cylinder length="0.3" radius="0.05"/>
+            </geometry>
+            <material name="lavender">
+                <color rgba="0.9019607843137255 0.9019607843137255 0.9803921568627451 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="joint_viz5" type="fixed">
+        <parent link="link4"/>
+        <child link="joint_viz_link5"/>
+        <origin xyz="0 0 0.3" rpy="0 0 0"/>
+    </joint>
+    <link name="joint_viz_link5">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.0022020833333333332" iyy="0.0022020833333333332" izz="0.0018" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="1.57 0 0"/>
+            <geometry>
+                <cylinder length="0.125" radius="0.06"/>
+            </geometry>
+            <material name="sienna">
+                <color rgba="0.6274509803921569 0.3215686274509804 0.17647058823529413 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="joint5" type="revolute">
+        <parent link="link4"/>
+        <child link="link5"/>
+        <origin xyz="0 0 0.3" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+        <limit lower="-3.14" upper="3.14" effort="10" velocity="1"/>
+    </joint>
+    <link name="link5">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.003958333333333334" iyy="0.003958333333333334" izz="0.0012500000000000002" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0.1" rpy="0 0 0"/>
+            <geometry>
+                <cylinder length="0.2" radius="0.05"/>
+            </geometry>
+            <material name="sienna">
+                <color rgba="0.6274509803921569 0.3215686274509804 0.17647058823529413 1.0"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="probe_joint" type="fixed">
+        <parent link="link5"/>
+        <child link="probe_link"/>
+        <origin xyz="0 0 0.2" rpy="0 0 0"/>
+    </joint>
+    <link name="probe_link">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.0008583333333333335" iyy="0.0008583333333333335" izz="5e-05" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <cylinder length="0.1" radius="0.01"/>
+            </geometry>
+            <material name="gray">
+                <color rgba="0.5 0.5 0.5 1"/>
+            </material>
+        </visual>
+    </link>
+    <joint name="end_effector_joint" type="fixed">
+        <parent link="probe_link"/>
+        <child link="end_effector"/>
+        <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    </joint>
+    <link name="end_effector">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.0" iyy="0.0" izz="0.0" ixy="0.0" ixz="0.0" iyz="0.0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <cylinder length="0" radius="0"/>
+            </geometry>
+            <material name="gray">
+                <color rgba="0.5 0.5 0.5 1"/>
+            </material>
+        </visual>
+    </link>
+</robot>

@@ -90,63 +90,6 @@ class GeneticAlgorithm:
         """
         # Weights for each term
         alpha = 0.1  # Pose error penalty weight    
-        beta = 0.1   # Joint penalty weight
-        delta = 0.1  # Joint torque penalty weight
-        gamma = 5.0  # Conditioning index reward weight
-
-        pose_error_norm = 0.5  # Normalization factor for pose error (expected max pose error)
-        torque_norm = 100.0  # Normalization factor for gravity torque magnitude (expected max torque)
-
-        # ** Penalty for pose error **:
-        pose_errors, target_joint_positions = zip(*[chain.compute_pose_fitness(target) for target in self.target_positions])
-        mean_pose_error = np.mean(pose_errors)
-
-        normalized_pose_error = (mean_pose_error / pose_error_norm)**2 # The square error on pose penalizes large errors more drastically
-
-        # ** Penalty for number of joints**: Encourage fewer joints by adding a cost term
-        joint_penalty = self.joint_penalty_weight * chain.num_joints  # Linear penalty based on joint count
-        normalized_joint_penalty = joint_penalty / self.max_num_joints
-
-        # ** Gravity Torque Magnitude Penalty **
-        mean_torque_magnitude = np.mean([
-            chain.compute_gravity_torque_magnitute(jp) for jp in target_joint_positions
-        ])
-        normalized_torque_penalty = (mean_torque_magnitude / torque_norm)**2  
-
-        # ** Reward global conditioning numbers that are closer to 1 (Using an inverse function to penalize deviation from 1)
-        conditioning_index = chain.compute_global_conditioning_index()
-        conditioning_index_scaled = 1 / (1 + abs(conditioning_index - 1))
-
-        # print(f"Pose Error: {np.round(mean_pose_error, 4)}, Joint Penalty: {np.round(joint_penalty, 4)}, "
-        #       f"Torque Penalty: {np.round(mean_torque_magnitude, 4)}, Conditioning Index: {np.round(conditioning_index, 4)}")
-        # print(f"Pose Error: {np.round(np.exp(-alpha * normalized_pose_error), 4)}, Joint Penalty: {np.round(np.exp(-beta * normalized_joint_penalty), 4)}, "
-        #       f"Torque Penalty: {np.round(np.exp(-delta * normalized_torque_penalty), 4)}, Conditioning Index: {np.round(conditioning_index_scaled, 4)}")
-
-        # ** Combine all terms **
-        fitness_score = (
-            np.exp(-alpha * normalized_pose_error) *  
-            np.exp(-beta * joint_penalty) *  
-            np.exp(-delta * normalized_torque_penalty) *  # New torque penalty
-            conditioning_index_scaled  # Reward for good conditioning
-        )
-        
-        return fitness_score
-    
-    def fitness2(self, chain):
-        """
-        Calculate the fitness of a given chain based on target positions.
-
-        The fitness is computed as the average error between the chain's computed
-        positions and the target positions.
-
-        Args:
-            chain (KinematicChain): The chain object whose fitness is to be calculated.
-
-        Returns:
-            float: The average error representing the fitness of the chain.
-        """
-        # Weights for each term
-        alpha = 2.0  # Pose error penalty weight    
         beta = 0.001   # Joint torque penalty weight
         delta = 0.001  # Joint penalty weight
         gamma = 3.0  # Conditioning index reward weight
@@ -158,7 +101,7 @@ class GeneticAlgorithm:
         # ** Quadratic Normalization of Penalties**
         normalized_pose_error = (chain.mean_pose_error / pose_error_norm) ** 2
         normalized_torque_penalty = (chain.mean_torque / torque_norm) ** 2
-        joint_penalty = (chain.num_joints / self.max_num_joints) ** 2
+        joint_penalty = chain.num_joints / self.max_num_joints
 
         # ** Reward global conditioning numbers that are closer to 1 (Using an exponential function to penalize deviation from 1)
         conditioning_index = chain.compute_global_conditioning_index()
@@ -167,7 +110,8 @@ class GeneticAlgorithm:
         normalized_pose_error_scaled = np.exp(-alpha * normalized_pose_error)  # Exponential decay for pose error
         normalized_torque_penalty_scaled = np.exp(-beta * normalized_torque_penalty)  # Exponential decay for torque penalty
         joint_penalty_scaled = np.exp(-delta * joint_penalty)  # Exponential decay for joint penalty
-        conditioning_index_scaled = np.exp(-gamma * abs(conditioning_index - 1)) # Use an exponential decay to penalize deviation from 1
+        # conditioning_index_scaled = np.exp(-gamma * abs(conditioning_index - 1)) # Use an exponential decay to penalize deviation from 1
+        conditioning_index_scaled = 1 / (1 + abs(conditioning_index - 1)) # Use an inverse function to penalize deviation from 1
 
         # print(f"Pose Error: {np.round(normalized_pose_error_scaled, 4)}, Joint Penalty: {np.round(joint_penalty_scaled, 4)}, "
         #   f"Torque Penalty: {np.round(normalized_torque_penalty_scaled, 4)}, Conditioning Index: {np.round(conditioning_index_scaled, 4)}")
@@ -278,37 +222,6 @@ class GeneticAlgorithm:
     
     def sort_population(self, population):
         """
-        Sort the population of kinematic chains based on their fitness scores.
-        
-        Args:
-            population (list): A list of kinematic chain objects to be sorted.
-        
-        Returns:
-            list: A sorted list of kinematic chains based on their fitness scores.
-            list: A list of fitness scores corresponding to the sorted kinematic chains.
-        """
-        # Compute fitness for each chain and store the pose errors and torques
-        chain_fitness = []
-        for chain in population:
-            if not chain.is_built:
-                chain.build_robot()
-
-            chain.load_robot()  # Load the robot into the simulation
-
-            fitness_score = self.fitness(chain)
-            chain_fitness.append((chain, fitness_score))
-
-            self.pyb.con.resetSimulation()
-            self.pyb.enable_gravity()
-        
-        # Sort population based on fitness (higher fitness is better)
-        chain_fitness.sort(key=lambda x: x[1], reverse=True)
-        population = [fs[0] for fs in chain_fitness]
-        fitness_scores = [fs[1] for fs in chain_fitness]
-        return population, fitness_scores
-    
-    def sort_population2(self, population):
-        """
         Score the population of kinematic chains based on their fitness scores.
         
         Args:
@@ -329,7 +242,7 @@ class GeneticAlgorithm:
             self.population_pose_errors.append(chain.mean_pose_error)
             self.population_torques.append(chain.mean_torque)
 
-            fitness_score = self.fitness2(chain)
+            fitness_score = self.fitness(chain)
             chain_fitness.append((chain, fitness_score))
 
             self.pyb.con.resetSimulation()

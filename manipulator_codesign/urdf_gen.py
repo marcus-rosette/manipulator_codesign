@@ -412,9 +412,9 @@ if __name__ == '__main__':
     # joint_types = [1, 1, 1, 1, 1]
     # link_lens = [0.5, 0.5, 0.5, 0.5, 0.5]
 
-    axes = ['y', 'x']
-    joint_types = [1, 1]
-    link_lens = [0.5, 0.5]
+    axes = ['y', 'x', 'z', 'y', 'x', 'y']
+    joint_types = [1, 1, 1, 1, 1, 1]
+    link_lens = [0.5, 0.5, 0.6, 0.4, 0.3, 0.2]
 
     joint_limit_prismatic = (-0.5, 0.5)
     joint_limit_revolute = (-3.14, 3.14)

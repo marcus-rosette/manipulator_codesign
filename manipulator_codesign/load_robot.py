@@ -40,7 +40,7 @@ class LoadRobot:
         self.robotId = self.con.loadURDF(self.robot_urdf_path, self.start_pos, self.start_orientation, useFixedBase=True, flags=flags)
         self.num_joints = self.con.getNumJoints(self.robotId)
 
-        self.end_effector_index = self.get_end_effector_index_by_name(self.ee_link_name)
+        self.end_effector_index = self.get_end_effector_index(self.ee_link_name)
 
         self.controllable_joint_idx = [
             self.con.getJointInfo(self.robotId, joint)[0]
@@ -63,12 +63,12 @@ class LoadRobot:
         # Get the starting end-effector pos
         self.home_ee_pos, self.home_ee_ori = self.get_link_state(self.end_effector_index)
 
-    def get_end_effector_index_by_name(self, target_names=None):
+    def get_end_effector_index(self, target_names=None):
         """
         Returns the first joint index whose link name matches one of the target_names.
         """
         if target_names is None:
-            target_names = ['ee_link', 'gripper_link', 'tool0']
+            target_names = ['end_effector', 'ee_link', 'gripper_link', 'tool0']
         for i in range(self.num_joints):
             link_name = self.con.getJointInfo(self.robotId, i)[12].decode('utf-8')
             if link_name in target_names:
@@ -81,7 +81,7 @@ class LoadRobot:
             self.con.setJointMotorControl2(self.robotId, joint_idx, self.con.POSITION_CONTROL, joint_positions[i])
             self.con.stepSimulation()
     
-    def set_joint_positions2(self, joint_positions):
+    def set_joint_configuration(self, joint_positions):
         joint_positions = list(joint_positions)
         self.con.setJointMotorControlArray(self.robotId, self.controllable_joint_idx, self.con.POSITION_CONTROL, targetPositions=joint_positions)
         self.con.stepSimulation()
@@ -95,7 +95,7 @@ class LoadRobot:
     def set_joint_path(self, joint_path):
         # Vizualize the interpolated positions
         for config in joint_path:
-            self.set_joint_positions2(config)
+            self.set_joint_configuration(config)
             time.sleep(1/25)
 
     def get_joint_positions(self):
