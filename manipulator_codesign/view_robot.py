@@ -99,6 +99,7 @@ class ViewRobot:
             input("Press Enter to continue...")
 
             if not i == 0:
+                target_point_id = 0
                 # Remove the previous target point after reaching it
                 self.pyb.con.removeBody(target_point_id) 
         

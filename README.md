@@ -30,7 +30,7 @@ python manipulator_codesign/examples/run_genetic_algorithm.py
 
 To customize optimization settings, specify parameters such as population size, number of generations, mutation rate, and crossover rate:
 ```bash
-python run_genetic_algorithm.py -p 200 -g 100 -m 0.3 -c 0.7
+python manipulator_codesign/examples/run_genetic_algorithm.py -p 200 -g 100 -m 0.3 -c 0.7
 ```
 Where:
 - -p (--population_size): Number of candidate solutions in each generation (default: 100).
