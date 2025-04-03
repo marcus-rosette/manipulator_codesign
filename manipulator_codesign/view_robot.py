@@ -94,12 +94,12 @@ class ViewRobot:
 
     def main(self):
         target_positions = np.random.uniform(low=[-2.0, -2.0, 0], high=[2.0, 2.0, 2.0], size=(20, 3)).tolist()
+        target_point_id = None
 
         for i, position in enumerate(target_positions):
             input("Press Enter to continue...")
 
-            if not i == 0:
-                target_point_id = 0
+            if target_point_id is not None:
                 # Remove the previous target point after reaching it
                 self.pyb.con.removeBody(target_point_id) 
         
@@ -114,6 +114,18 @@ class ViewRobot:
         
             # Move arm to the target pose using inverse kinematics
             joint_config = self.robot.inverse_kinematics(position, pos_tol=self.ik_tol, max_iter=1000)
+
+            if self.robot.check_collision_aabb(self.robot.robotId, self.robot.robotId):
+                print("Collision detected!")
+            # joint_path = self.robot.optimized_rrt_path(self.robot.home_config, joint_config)
+            # if joint_path is None:
+            #     print("RRT path planning failed. Defaulting to plain IK.")
+            #     self.robot.set_joint_configuration(joint_config)
+
+            # else:
+            #     # Execute the planned joint path
+            #     self.robot.set_joint_path(joint_path)
+
             self.robot.set_joint_configuration(joint_config)
 
             # Step simulation and render

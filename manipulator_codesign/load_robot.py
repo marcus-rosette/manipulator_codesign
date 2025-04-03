@@ -1,7 +1,9 @@
 import numpy as np
 import time
 from scipy.spatial.transform import Slerp
+from joblib import Parallel, delayed
 from scipy.spatial.transform import Rotation as R
+import pybullet_planning as pp
 from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
 from pybullet_planning import cartesian_motion_planning
 
@@ -58,6 +60,8 @@ class LoadRobot:
         if self.home_config is None:
             self.home_config = [0.0] * len(self.controllable_joint_idx)
 
+        self.zero_vec = [0.0] * len(self.controllable_joint_idx)
+
         self.reset_joint_positions(self.home_config)
 
         # Get the starting end-effector pos
@@ -79,7 +83,7 @@ class LoadRobot:
         joint_positions = list(joint_positions)
         for i, joint_idx in enumerate(self.controllable_joint_idx):
             self.con.setJointMotorControl2(self.robotId, joint_idx, self.con.POSITION_CONTROL, joint_positions[i])
-            self.con.stepSimulation()
+        self.con.stepSimulation()
     
     def set_joint_configuration(self, joint_positions):
         joint_positions = list(joint_positions)
@@ -90,13 +94,12 @@ class LoadRobot:
         joint_positions = list(joint_positions)
         for i, joint_idx in enumerate(self.controllable_joint_idx):
             self.con.resetJointState(self.robotId, joint_idx, joint_positions[i])
-            self.con.stepSimulation()
+        self.con.stepSimulation()
 
     def set_joint_path(self, joint_path):
         # Vizualize the interpolated positions
         for config in joint_path:
             self.set_joint_configuration(config)
-            time.sleep(1/25)
 
     def get_joint_positions(self):
         return [self.con.getJointState(self.robotId, i)[0] for i in self.controllable_joint_idx]
@@ -112,7 +115,7 @@ class LoadRobot:
         self.reset_joint_positions(joint_config)
 
         # Return collision bool
-        return self.con.getContactPoints(bodyA=self.robotId, bodyB=self.robotId)
+        return len(self.con.getContactPoints(bodyA=self.robotId, bodyB=self.robotId)) > 0
     
     def check_collision_aabb(self, robot_id, plane_id):
         # Get AABB for the plane (ground)
@@ -131,44 +134,25 @@ class LoadRobot:
         return False
     
     def inverse_kinematics(self, pose, pos_tol=1e-4, rest_config=None, max_iter=100):
-        if rest_config is None:
-            rest_config = self.home_config
+        # Set the rest configuration to home if not provided
+        rest_config = rest_config or self.home_config
 
-        if len(pose) == 3:
-            position = pose
-            orientation = None
-        elif len(pose) == 2:
-            position = pose[0]
-            orientation = pose[1]
-            if not isinstance(orientation, list):
-                orientation = orientation.tolist()
-
+        # Check if the pose is a list of length 2 or 3 (position or position + orientation)
+        position, orientation = pose if len(pose) == 2 else (pose, None)
+        
+        # Stage IK arguments
+        kwargs = {
+            "lowerLimits": self.lower_limits,
+            "upperLimits": self.upper_limits,
+            "jointRanges": self.joint_ranges,
+            "restPoses": rest_config,
+            "residualThreshold": pos_tol,
+            "maxNumIterations": max_iter
+        }
+        
         if orientation is not None:
-            joint_positions = self.con.calculateInverseKinematics(
-                self.robotId, 
-                self.end_effector_index, 
-                position, 
-                orientation, 
-                lowerLimits=self.lower_limits,
-                upperLimits=self.upper_limits,
-                jointRanges=self.joint_ranges,
-                restPoses=rest_config,
-                residualThreshold=pos_tol,
-                maxNumIterations=max_iter
-                )
-        else:
-            joint_positions = self.con.calculateInverseKinematics(
-                self.robotId, 
-                self.end_effector_index, 
-                position, 
-                lowerLimits=self.lower_limits,
-                upperLimits=self.upper_limits,
-                jointRanges=self.joint_ranges,
-                restPoses=rest_config,
-                residualThreshold=pos_tol,
-                maxNumIterations=max_iter
-                )
-        return joint_positions
+            return self.con.calculateInverseKinematics(self.robotId, self.end_effector_index, position, orientation, **kwargs)
+        return self.con.calculateInverseKinematics(self.robotId, self.end_effector_index, position, **kwargs)
     
     def inverse_dynamics(self, joint_positions, joint_velocities=None, joint_accelerations=None):
         joint_velocities = joint_velocities or [0.0] * len(joint_positions)
@@ -189,10 +173,27 @@ class LoadRobot:
         return pos_diff <= pos_tolerance and np.abs(ori_diff) <= ori_tolerance
     
     def get_jacobian(self, joint_positions):
+        """
+        Computes the full Jacobian for the given joint positions.
+
+        Args:
+            joint_positions (list): The list of joint angles/positions.
+
+        Returns:
+            np.ndarray: The full 6xN Jacobian matrix.
+        """
         joint_positions = list(joint_positions)
-        zero_vec = [0.0] * len(joint_positions)
-        jac_t, jac_r = self.con.calculateJacobian(self.robotId, self.end_effector_index, [0, 0, 0], joint_positions, zero_vec, zero_vec)
+
+        jac_t, jac_r = self.con.calculateJacobian(
+            self.robotId, self.end_effector_index, [0, 0, 0], joint_positions, self.zero_vec, self.zero_vec
+        )
+
+        # Ensure correct stacking of the Jacobian components
+        if jac_t is None or jac_r is None or len(jac_t) == 0 or len(jac_r) == 0:
+            return np.zeros((6, len(joint_positions)))  # Return zero matrix if Jacobian is invalid
+
         jacobian = np.vstack((jac_t, jac_r))
+
         return jacobian
     
     def jacobian_viz(self, jacobian, end_effector_pos):
@@ -593,15 +594,28 @@ class LoadRobot:
             return final_conf
         return sample
 
-    def rrt_path(self, start_positions, end_positions, target_pos=None, steps=100, rrt_iter=500):
+    def rrt_path(self, start_joint_config, end_joint_config, target_pos=None, steps=0, rrt_iter=500):
         extend_fn = get_extend_fn(self.robotId, self.controllable_joint_idx)
         collision_fn = get_collision_fn(self.robotId, self.controllable_joint_idx, self.collision_objects)
         distance_fn = get_distance_fn(self.robotId, self.controllable_joint_idx)
-        # sample_fn = get_sample_fn(self.robotId, self.controllable_joint_idx)
-        sample_fn = self.vector_field_sample_fn(target_pos)
+        sample_fn = get_sample_fn(self.robotId, self.controllable_joint_idx)
+        # sample_fn = self.vector_field_sample_fn(target_pos)
+
+        # Step 1: Early Exit - If Start is Already Close to Any Goal - Compute Euclidean distance (L2 norm)
+        if np.linalg.norm(np.array(start_joint_config) - np.array(end_joint_config)) < 0.1:
+            print("Start configuration is already close to the goal. No need for RRT.")
+            return [start_joint_config, end_joint_config]
+
+        # Step 2: Early Collision Check
+        if collision_fn(start_joint_config):
+            print("Start configuration is in collision. Skipping RRT.")
+            return None 
+        elif collision_fn(end_joint_config):
+            print("End configuration is in collision. Skipping RRT.")
+            return None
 
         path = rrt_connect(
-            start_positions, end_positions,
+            start_joint_config, end_joint_config,
             extend_fn=extend_fn,
             collision_fn=collision_fn,
             distance_fn=distance_fn,
@@ -610,11 +624,11 @@ class LoadRobot:
         )
         
         # Ensure the path has exactly `steps` joint configurations
-        if path:
+        if path != None and steps > 0: 
             path = self.sample_path_to_length(path, steps)
         
         return path
-    
+
     def plan_cartesian_motion_path(self, waypoint_poses, max_iterations=200, custom_limits={}, get_sub_conf=False, **kwargs):
         """
         Plans a Cartesian motion path along a series of end-effector waypoints 

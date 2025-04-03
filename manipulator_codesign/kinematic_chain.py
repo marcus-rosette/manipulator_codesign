@@ -1,5 +1,6 @@
 import numpy as np
 from tabulate import tabulate
+from scipy.linalg import svdvals
 import roboticstoolbox as rtb
 from spatialmath import SE3
 from manipulator_codesign.urdf_gen import URDFGen
@@ -118,6 +119,7 @@ class KinematicChainPyBullet(KinematicChainBase):
 
         self.mean_pose_error = None
         self.mean_torque = None
+        self.global_conditioning_index = None
         self.target_joint_positions = None
 
         self.is_built = False
@@ -137,9 +139,10 @@ class KinematicChainPyBullet(KinematicChainBase):
                                start_pos=[0, 0, 0], 
                                start_orientation=self.pyb_con.getQuaternionFromEuler([0, 0, 0]),
                                home_config=[0] * self.num_joints,
-                               ee_link_name=self.ee_link_name)
+                               ee_link_name=self.ee_link_name,
+                               collision_objects=[])
         self.is_loaded = True
-    
+
     def compute_chain_metrics(self, targets):
         # Compute the mean pose error and mean torque for the given targets.
         pose_errors, self.target_joint_positions = zip(*[self.compute_pose_fitness(target) for target in targets])
@@ -147,7 +150,10 @@ class KinematicChainPyBullet(KinematicChainBase):
 
         self.mean_torque = np.mean([self.compute_gravity_torque_magnitute(joint_positions) for joint_positions in self.target_joint_positions])
 
-    def compute_pose_fitness(self, target):
+        # Compute the Global Conditioning Index (GCI) for the kinematic chain.
+        self.global_conditioning_index = self.compute_global_conditioning_index(num_samples=50)
+
+    def compute_pose_fitness(self, target, plan_rrt=False):
         """
         Compute the fitness of the robot's configuration by solving the inverse kinematics (IK) problem.
 
@@ -165,31 +171,65 @@ class KinematicChainPyBullet(KinematicChainBase):
         float: The computed fitness value. A lower value indicates a better fit. If an error occurs during
                IK computation, a large fitness value (1e6) is returned.
         """
-        # Check if there is a target orientation (quaternion)
+        # Step 1: Check if there is a target orientation (quaternion)
         if len(target) == 2:
             target_pos, target_quat = target
         else:
             target_pos = target
             target_quat = None
 
-        # TODO: If returning joint positoins, what should be done if IK fails?
+        # # Step 2: Reset the robot to home position
+        # self.robot.reset_joint_positions(self.robot.home_config)
 
-        # Initial reachability check
-        max_reach = np.sum(self.link_lengths)
-        target_distance = np.linalg.norm(target_pos)
-        if target_distance > max_reach:
-            # print('Unreachable target point')
+        # Step 3: Quick reachability check (calculated the squared distance to avoid sqrt computation)
+        max_reach_sq = np.sum(self.link_lengths) ** 2
+        target_dist_sq = np.dot(target_pos, target_pos)  # Computes x^2 + y^2 + z^2
+        if target_dist_sq > max_reach_sq:
             return 1e6, [0.0] * self.num_joints
 
         # TODO: how much tolerance should we allow?
+        # Step 4: Compute IK
+        rest_config = self.robot.home_config
+        collision_free = False
+
         try:
-            joint_config = self.robot.inverse_kinematics(target, pos_tol=0.01)
+            # Attempt to find a collision-free solution
+            for attempt in range(5):  # Try to find a collision-free solution
+                joint_config = self.robot.inverse_kinematics(target, pos_tol=0.01, rest_config=rest_config, max_iter=200)
+
+                # Skip collision check if the joint configuration is invalid
+                if joint_config is None:
+                    continue  
+
+                # Check for self-collision
+                self.robot.reset_joint_positions(joint_config)
+                if not self.robot.check_collision_aabb(self.robot.robotId, self.robot.robotId):
+                    collision_free = True
+                    break
+
+                # Adjust rest configuration slightly to explore new solutions
+                # Modify the rest configuration slightly instead of random sampling
+                rest_config = np.clip(np.array(rest_config) + np.random.uniform(-0.05, 0.05, len(rest_config)),
+                                    self.robot.lower_limits, self.robot.upper_limits).tolist()
+
+            if not collision_free:
+                # print("Warning: Unable to find a collision-free IK solution.")
+                return 1e6, [0.0] * self.num_joints
         except Exception as e:
             print("IK Error:", e)
             return 1e6, [0.0] * self.num_joints
-        # Reset the robot to home position and set the joint configuration
-        self.robot.set_joint_configuration(self.robot.home_config)
-        self.robot.set_joint_configuration(joint_config)
+        
+        # Step 5: Set the configuration or plan a path using RRT
+        if plan_rrt:
+            joint_path = self.robot.rrt_path(self.robot.home_config, joint_config)
+            if joint_path is None:
+                return 1e6, [0.0] * self.num_joints
+            # Execute the planned joint path
+            self.robot.set_joint_path(joint_path)
+        else:
+            # Reset the robot to home position and set the target joint configuration
+            # self.robot.set_joint_configuration(self.robot.home_config)
+            self.robot.set_joint_configuration(joint_config)
 
         # Get the end-effector position and orientation at the target joint configuration
         ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
@@ -244,9 +284,9 @@ class KinematicChainPyBullet(KinematicChainBase):
         Returns:
             float: The computed GCI value. Higher values indicate better conditioning.
         """
-        gci_values = []
+        gci_values = np.zeros(num_samples)
 
-        for _ in range(num_samples):
+        for i in range(num_samples):
             # Generate a random valid joint configuration within limits
             random_config = np.array([
                 np.random.uniform(*self.joint_limits[i]) for i in range(self.num_joints)
@@ -258,27 +298,25 @@ class KinematicChainPyBullet(KinematicChainBase):
             # Compute the Jacobian
             J = np.array(self.robot.get_jacobian(list(random_config)))
 
-            if J.size == 0:
-                continue  # Skip if Jacobian computation fails
+            if J.shape[0] != 6:  # Ensure the Jacobian properly accounts for all 6 DOFs
+                continue  # Skip if Jacobian computation fails or is incorrect
 
             # Compute singular values (axes lengths of the manipulability ellipsoid)
-            _, singular_values, _ = np.linalg.svd(J)
+            # _, singular_values, _ = np.linalg.svd(J)
+            singular_values = svdvals(J)  # More efficient than full SVD
 
             # Replace near-zero singular values with epsilon to avoid division issues
             singular_values = np.maximum(singular_values, epsilon)
 
             # Compute the condition number (k = sigma_max / sigma_min) - Could also use np.linalg.cond(J)
             cond_num = np.max(singular_values) / np.min(singular_values)
+            # cond_num = np.linalg.cond(J, p=2) # Compute condition number using 2-norm
 
             # Compute GCI contribution from this sample (square of the inverse of condition number)
             # Note: Not squaring this value is also acceptable. Squaring can simplify algebra, but might not be necessary here
-            gci_values.append((1.0 / cond_num) ** 2)
+            gci_values[i] = (1.0 / cond_num) ** 2
 
-        if not gci_values:
-            return 0.0  # Return 0 if no valid configurations were found
-
-        # Compute and return the mean GCI
-        return np.mean(gci_values)
+        return np.mean(gci_values[gci_values > 0]) if np.any(gci_values > 0) else 0.0
     
     def compute_gravity_torque_magnitute(self, joint_positions):
         """
@@ -332,6 +370,11 @@ class KinematicChainPyBullet(KinematicChainBase):
         # Clamp dot_prod to the valid range [-1, 1] to avoid numerical issues
         dot_prod = np.clip(dot_prod, -1.0, 1.0)
         ang_error = 2 * np.arccos(dot_prod)
+
+        # NOTE: BELOW METHOD NOT TESTED
+        # # Compute quaternion difference more efficiently
+        # relative_rotation = R.from_quat(actual_quat) * R.from_quat(target_quat).inv()
+        # ang_error = 2 * np.arccos(np.clip(relative_rotation.as_quat()[-1], -1.0, 1.0))
         
         # Combine errors using the specified weights
         total_error = weight_position * pos_error + weight_orientation * ang_error

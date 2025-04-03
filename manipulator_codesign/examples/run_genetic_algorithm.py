@@ -8,7 +8,7 @@ from manipulator_codesign.genetic_algorithm import GeneticAlgorithm
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Run Genetic Algorithm for Kinematic Chain Optimization")
     
-    parser.add_argument("-p", "--population_size", type=int, default=100, help="Size of the population. Defaults to 100")
+    parser.add_argument("-p", "--population_size", type=int, default=30, help="Size of the population. Defaults to 100")
     parser.add_argument("-g", "--generations", type=int, default=50, help="Number of generations. Defaults to 50")
     parser.add_argument("-j", "--max_num_joints", type=int, default=7, help="Maximum number of joints. Defaults to 7")
     parser.add_argument("-m", "--mutation_rate", type=float, default=0.3, help="Mutation rate. Defaults to 0.3")
@@ -27,14 +27,8 @@ if __name__ == "__main__":
     # Bool to sample target end-effector poses from a list of predefined poses
     sample_target_poses = False
 
-    # Example Target End-Effector Positions
-    target_positions = [
-        [1.0, 1.0, 1.0], [0.5, 1.5, 1.2], [-0.5, 1.0, 0.8], [0.0, 1.0, 1.0],
-        [-1.0, 1.5, 1.2], [-0.5, 0.5, 0.1], [0.5, 0.5, 1.0], [1.2, -0.5, 0.9],
-        [-1.2, 0.8, 1.1], [0.3, -1.0, 1.3], [-0.7, -1.2, 0.7], [0.8, 1.3, 1.4],
-        [-1.1, -0.8, 0.6], [0.6, -0.6, 1.5], [-0.3, 0.7, 1.2]
-    ]
-
+    target_positions = np.random.uniform(low=[-2.0, -2.0, 0], high=[2.0, 2.0, 2.0], size=(20, 3)).tolist()
+    
     target_orientations = [
         Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
         Rotation.from_euler('xyz', [-90, 90, 0], degrees=True).as_quat(),
