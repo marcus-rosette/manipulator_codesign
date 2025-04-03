@@ -1,7 +1,5 @@
 import numpy as np
-import time
 from scipy.spatial.transform import Slerp
-from joblib import Parallel, delayed
 from scipy.spatial.transform import Rotation as R
 import pybullet_planning as pp
 from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
