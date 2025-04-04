@@ -1,105 +1,53 @@
 import numpy as np
 from scipy.spatial.transform import Rotation
-from pymoo.core.problem import ElementwiseProblem
+import pickle
+from pymoo.core.problem import Problem
 from pymoo.algorithms.moo.nsga2 import NSGA2
-from pymoo.visualization.scatter import Scatter
+from pymoo.operators.sampling.lhs import LatinHypercubeSampling
+from pymoo.operators.crossover.sbx import SimulatedBinaryCrossover
+from pymoo.operators.mutation.pm import PolynomialMutation
 from pymoo.optimize import minimize
 
+from manipulator_codesign.moo_decoder import decode_decision_vector
 from manipulator_codesign.kinematic_chain import KinematicChainRTB, KinematicChainPyBullet
 
 
-def decode_decision_vector(x, min_joints=2, max_joints=5):
-    """
-    Decode a decision vector into kinematic chain parameters.
-    
-    The decision vector is encoded as follows:
-      - x[0]: Number of joints (integer in [min_joints, max_joints])
-      - For each of max_joints potential joints (i = 0,...,max_joints-1):
-          x[3*i + 1]: Joint type (integer 0 or 1)
-          x[3*i + 2]: Joint axis (integer 0, 1, or 2 corresponding to 'x','y','z')
-          x[3*i + 3]: Link length (continuous value in [0.1, 0.75])
-          
-    Only the first 'num_joints' (decoded from x[0]) are used.
-    
-    Returns:
-        num_joints (int): Actual number of joints (clipped between min_joints and max_joints).
-        joint_types (list of int): List of joint types for the active joints.
-        joint_axes (list of str): List of joint axes ('x','y','z') for the active joints.
-        link_lengths (list of float): List of link lengths for the active joints.
-    """
-    # Decode number of joints and clip to [min_joints, max_joints]
-    num_joints = int(np.rint(x[0]))
-    num_joints = max(min_joints, min(num_joints, max_joints))
-    
-    joint_types = []
-    joint_axes = []
-    link_lengths = []
-    axis_map = {0: 'x', 1: 'y', 2: 'z'}
-    
-    # Loop through each active joint and decode its parameters.
-    for i in range(num_joints):
-        idx = 3 * i + 1  # Starting index for joint i's parameters
-        
-        # Decode joint type and ensure it's either 0 or 1
-        joint_type = int(np.rint(x[idx]))
-        joint_type = 0 if joint_type < 0 else (1 if joint_type > 1 else joint_type)
-        joint_types.append(joint_type)
-        
-        # Decode joint axis and map to a character ('x', 'y', 'z')
-        joint_axis = int(np.rint(x[idx + 1]))
-        joint_axis = 0 if joint_axis < 0 else (2 if joint_axis > 2 else joint_axis)
-        joint_axes.append(axis_map[joint_axis])
-        
-        # Decode link length and clip within allowed bounds [0.1, 0.75]
-        length = np.clip(x[idx + 2], 0.1, 0.75)
-        link_lengths.append(length)
-    
-    return num_joints, joint_types, joint_axes, link_lengths
-
-
-class KinematicChainProblem(ElementwiseProblem):
-    def __init__(self, target_positions, backend='pybullet', renders=False,
-                 min_joints=2, max_joints=5):
+class KinematicChainProblem(Problem):
+    def __init__(self, target_positions, backend='pybullet', renders=False, min_joints=2, max_joints=5, alpha=10.0, beta=0.1, delta=0.1, gamma=3.0):
         """
-        Define the optimization problem for kinematic chain design.
+        Define the NSGA-II optimization problem for kinematic chain design.
         
-        The decision vector is parameterized by the number of joints and
-        joint parameters. Its length is:
+        The decision vector has length:
             1 + (max_joints * 3)
-        where:
-          - x[0] is the number of joints (integer in [min_joints, max_joints])
-          - For each of max_joints joints:
-              x[3*i+1]: Joint type (0 or 1)
-              x[3*i+2]: Joint axis (0,1,2 corresponding to 'x','y','z')
-              x[3*i+3]: Link length (continuous between 0.1 and 0.75)
-        
-        Objectives:
-          1. Minimize overall tracking error (e.g., maximum error among targets).
-          2. Minimize the number of joints (to favor simpler designs).
+        and four objectives are computed.
         """
+        self.target_positions = np.array(target_positions)
         self.min_joints = min_joints
         self.max_joints = max_joints
 
-        # Build lower and upper bounds for the decision vector.
-        # First element: number of joints.
-        lower_bound = [min_joints]
-        upper_bound = [max_joints]
-        # For each potential joint (max_joints in total)
-        for _ in range(max_joints):
-            lower_bound.extend([0, 0, 0.1])   # Joint type, joint axis, link length lower bounds.
-            upper_bound.extend([1, 2, 0.75])    # Joint type, joint axis, link length upper bounds.
+        # Fitness function weights for each objective
+        self.alpha = alpha  # Pose error penalty weight    
+        self.beta = beta   # Joint torque penalty weight
+        self.delta = delta  # Joint penalty weight
+        self.gamma = gamma  # Conditioning index reward weight
         
-        n_var = 1 + (max_joints * 3)
-        super().__init__(n_var=n_var, n_obj=2, n_constr=0,
-                         xl=np.array(lower_bound), xu=np.array(upper_bound))
-        self.target_positions = np.array(target_positions)
-        self.backend = backend
+        # Define lower and upper bounds for the decision vector.
+        joint_type_bounds = [0, 1]  # Joint type: 0 (revolute), 1 (prismatic)
+        joint_axis_bounds = [0, 2]  # Joint axis: 0 (x-axis), 1 (y-axis), 2 (z-axis)
+        link_length_bounds = [0.1, 0.75]  # Link length: minimum 0.1, maximum 0.75
 
+        # Lower and upper bounds for the decision vector.
+        xl = [min_joints] + [joint_type_bounds[0], joint_axis_bounds[0], link_length_bounds[0]] * max_joints
+        xu = [max_joints] + [joint_type_bounds[1], joint_axis_bounds[1], link_length_bounds[1]] * max_joints
+        
+        super().__init__(n_var=len(xl), n_obj=4, n_constr=0, xl=np.array(xl), xu=np.array(xu))
+        
+        self.backend = backend
         if self.backend == 'pybullet':
-            # For PyBullet, initialize connection and related objects.
-            from pyb_utils import PybUtils
-            from load_objects import LoadObjects
-            self.pyb = PybUtils(self, renders=renders)
+            # Initialize PyBullet utilities.
+            from manipulator_codesign.pyb_utils import PybUtils
+            from manipulator_codesign.load_objects import LoadObjects
+            self.pyb = PybUtils(renders=renders)
             self.object_loader = LoadObjects(self.pyb.con)
         
     def _chain_factory(self, num_joints, joint_types, joint_axes, link_lengths):
@@ -110,107 +58,129 @@ class KinematicChainProblem(ElementwiseProblem):
             return KinematicChainPyBullet(self.pyb.con, num_joints, joint_types, joint_axes, link_lengths)
         else:
             return KinematicChainRTB(num_joints, joint_types, joint_axes, link_lengths)
+        
+    def _evaluate(self, X, out, *args, **kwargs):
+        """
+        Batch evaluation of all individuals in the population.
+        
+        For each candidate, the chain is built, loaded, and its metrics are computed.
+        The simulation is reset after each evaluation. Dynamic normalization factors are computed
+        from the batch before scaling the four objectives.
+        """
+        exp_fit = False
+        n_ind = X.shape[0]
+        
+        # Arrays to store raw metrics.
+        raw_pose_errors = np.zeros(n_ind)
+        raw_torques = np.zeros(n_ind)
+        joint_counts = np.zeros(n_ind)
+        conditioning_indices = np.zeros(n_ind)
+        
+        for i in range(n_ind):
+            x = X[i, :]
+            num_joints, joint_types, joint_axes, link_lengths = decode_decision_vector(x, self.min_joints, self.max_joints)
+            
+            # Create the chain.
+            chain = self._chain_factory(num_joints, joint_types, joint_axes, link_lengths)
+            
+            # Build and load the robot if needed.
+            if not chain.is_built:
+                chain.build_robot()
+            chain.load_robot()
+            
+            # Compute metrics (this should update chain.mean_pose_error, chain.mean_torque, etc.).
+            chain.compute_chain_metrics(self.target_positions)
+            
+            raw_pose_errors[i] = chain.mean_pose_error
+            raw_torques[i] = chain.mean_torque
+            joint_counts[i] = chain.num_joints
+            conditioning_indices[i] = chain.global_conditioning_index
+            
+            # Reset simulation to ensure a clean state for the next candidate.
+            self.pyb.con.resetSimulation()
+            self.pyb.enable_gravity()
+        
+        # Compute dynamic normalization factors from the current population.
+        pose_error_norm = max(1e-6, np.max(raw_pose_errors))
+        torque_norm = max(1e-6, np.max(raw_torques))
+        
+        # Compute the four objectives for each candidate.
+        F = np.zeros((n_ind, 4))
+        for i in range(n_ind):
 
-    def _evaluate(self, x, out, *args, **kwargs):
-        # Decode the decision vector (pass along min_joints and max_joints).
-        num_joints, joint_types, joint_axes, link_lengths = decode_decision_vector(
-            x, self.min_joints, self.max_joints)
-        
-        # Create the kinematic chain.
-        chain = self._chain_factory(num_joints, joint_types, joint_axes, link_lengths)
-        
-        # Compute the error for each target.
-        target_errors = np.array([chain.compute_fitness(target) for target in self.target_positions])
-        
-        # Option 1: Use the maximum error among targets as the overall error.
-        overall_error = target_errors.max()
+            if exp_fit:
+                normalized_pose_error = (raw_pose_errors[i] / pose_error_norm) ** 2
+                normalized_torque_penalty = (raw_torques[i] / torque_norm) ** 2
+                joint_penalty = joint_counts[i] / self.max_joints
+                conditioning_index = conditioning_indices[i]
+                
+                # Scale the metrics using exponential decay or inverse functions.
+                f1 = np.exp(-self.alpha * normalized_pose_error)      # Pose error objective (minimized)
+                f2 = np.exp(-self.beta * normalized_torque_penalty)     # Torque penalty objective (minimized)
+                f3 = np.exp(-self.delta * joint_penalty)                # Joint penalty objective (fewer joints are better)
+                f4 = - (1 / (1 + abs(conditioning_index - 1)))     # Conditioning index objective (rewarding values closer to 1)
 
-        # overall_error = chain.compute_motion_plan_fitness(self.target_positions)
+            else:
+                # ** Linear Normalization of Penalties**
+                normalized_pose_error = raw_pose_errors[i] / pose_error_norm
+                normalized_torque_penalty = raw_torques[i] / torque_norm
+                joint_penalty = joint_counts[i] / self.max_joints
+                conditioning_index = conditioning_indices[i]
 
-        # Option 2: Use the mean error across targets as the overall error.
-        # overall_error = target_errors.mean()
+                target_pose_error = 0.0
+                target_torque_error = 0.0
+                target_joint_penalty = 0.0
+                target_conditioning = 1.0
+
+                f1 = self.alpha * abs(normalized_pose_error - target_pose_error)
+                f2 = self.beta * abs(normalized_torque_penalty - target_torque_error)
+                f3 = self.delta * abs(joint_penalty - target_joint_penalty)
+                f4 = self.gamma * abs(conditioning_index - target_conditioning)
+
+            F[i, 0] = f1
+            F[i, 1] = f2
+            F[i, 2] = f3
+            F[i, 3] = f4
         
-        # Two objectives: overall tracking error and number of joints.
-        out["F"] = [overall_error, num_joints]
+        out["F"] = F
 
 
 if __name__ == '__main__':
     # Define target end-effector positions.
-    target_positions = [
-        [1.0, 1.0, 1.0],
-        [0.5, 1.5, 1.2],
-        [-0.5, 1.0, 0.8],
-        [0.0, 1.0, 1.0],
-        [-1.0, 1.5, 1.2],
-        [-0.5, 0.5, 0.1],
-        [0.5, 0.5, 1.0],
-        [1.2, -0.5, 0.9],
-        [-1.2, 0.8, 1.1],
-        [0.3, -1.0, 1.3],
-        [-0.7, -1.2, 0.7],
-        [0.8, 1.3, 1.4],
-        [-1.1, -0.8, 0.6],
-        [0.6, -0.6, 1.5],
-        [-0.3, 0.7, 1.2]
-    ]
-
-    target_orientations = [
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 90, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [90, 0, 0], degrees=True).as_quat(),
-        Rotation.from_euler('xyz', [-90, 0, 0], degrees=True).as_quat()
-    ]
-    target_poses = list(zip(target_positions, target_orientations))
+    target_positions = np.random.uniform(low=[-2.0, -2.0, 0], high=[2.0, 2.0, 2.0], size=(20, 3)).tolist()
     
-    # You can update these variables to search over a different range of joints.
-    min_joints = 2
-    max_joints = 7
-    
-    # Instantiate the problem using the updated joint limits.
-    problem = KinematicChainProblem(target_poses, min_joints=min_joints, max_joints=max_joints)
+    min_joints, max_joints = 3, 7
+    problem = KinematicChainProblem(target_positions, min_joints=min_joints, max_joints=max_joints)
     
     # Configure the NSGA-II algorithm.
-    algorithm = NSGA2(pop_size=30, eliminate_duplicates=True)
+    algorithm = NSGA2(
+        pop_size=500,  # Increased population size
+        sampling=LatinHypercubeSampling(),  # More uniform initial sampling
+        crossover=SimulatedBinaryCrossover(prob=0.9, eta=15),  # Adjusted crossover parameters
+        mutation=PolynomialMutation(prob=1.0/problem.n_var, eta=20),  # Adjusted mutation parameters
+        n_offsprings=250,  # More offsprings per generation
+        eliminate_duplicates=True
+    )
     
-    # Run the optimization for 20 generations.
-    res = minimize(problem,
-                   algorithm,
-                   termination=('n_gen', 10),
-                   seed=1,
-                   verbose=True)
-    
-    # Identify the best solution based on the smallest tracking error.
-    best_idx = np.argmin(res.F[:, 0])
-    best_decision_vector = res.X[best_idx]
-    
-    # Decode the best decision vector using the same joint limits.
-    num_joints, joint_types, joint_axes, link_lengths = decode_decision_vector(
-        best_decision_vector, min_joints, max_joints)
-    
-    # Create the best kinematic chain.
-    best_chain = KinematicChainRTB(num_joints, joint_types, joint_axes, link_lengths,
-                                   robot_name="NSGA_robot", save_urdf_dir=None)
-    
-    # Generate and save the URDF.
-    best_chain.create_urdf()
-    best_chain.save_urdf('best_chain')
-    
-    # Print the best chain description and objectives.
-    best_chain.describe()
-    print("\nBest solution objectives:")
-    print(f"  Tracking Error: {res.F[best_idx, 0]}")
-    print(f"  Number of Joints: {res.F[best_idx, 1]}")
-    
-    # Visualize the Pareto front.
-    Scatter().add(res.F).show()
+    # Run the optimization.
+    res = minimize(problem, algorithm, termination=('n_gen', 50), seed=1, verbose=True)
+
+    # Define a dictionary to store relevant results
+    results_dict = {
+        "decision_vecs": res.X,  # Decision vectors
+        "objective_vals": res.F,  # Objective values
+        "min_joints": min_joints,
+        "max_joints": max_joints,
+        "pose_weight": problem.alpha,
+        "torque_weight": problem.beta,
+        "joint_weight": problem.delta,
+        "conditioning_weight": problem.gamma,
+    }
+
+    storage_dir = '/home/marcus/IMML/manipulator_codesign/data/nsga2_results/'
+
+    # Save results to a pickle file
+    with open(f"{storage_dir}nsga2_results.pkl", "wb") as f:
+        pickle.dump(results_dict, f)
+
+    print(f"Results saved to {storage_dir}nsga2_results.pkl")

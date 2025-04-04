@@ -12,3 +12,5 @@ best_chain*.urdf
 test_robot*.urdf
 
 .coverage
+
+*.lprof
