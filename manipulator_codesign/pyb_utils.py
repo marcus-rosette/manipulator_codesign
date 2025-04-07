@@ -60,7 +60,7 @@ class PybUtils:
         self.con.setGravity(0, 0, 0)
 
     def enable_gravity(self):
-        self.con.setGravity(0, 0, -10)
+        self.con.setGravity(0, 0, -9.81)
 
     def disconnect(self):
         self.con.disconnect()

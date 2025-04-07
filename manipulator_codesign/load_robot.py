@@ -170,20 +170,23 @@ class LoadRobot:
         ori_diff = np.pi - self.quaternion_angle_difference(np.array(target_orientation), np.array(final_orientation))
         return pos_diff <= pos_tolerance and np.abs(ori_diff) <= ori_tolerance
     
-    def get_jacobian(self, joint_positions):
+    def get_jacobian(self, joint_positions, local_pos=[0, 0, 0]):
         """
-        Computes the full Jacobian for the given joint positions.
+        Computes the full Jacobian matrix for the given joint positions and a specified local position.
 
-        Args:
-            joint_positions (list): The list of joint angles/positions.
+            joint_positions (list or array-like): The list of joint angles/positions for the robot's joints.
+            local_pos (list, optional): A 3D position vector [x, y, z] in the local frame of the end-effector. 
+                        Defaults to [0, 0, 0].
 
-        Returns:
-            np.ndarray: The full 6xN Jacobian matrix.
+            np.ndarray: A 6xN Jacobian matrix, where N is the number of joints. The matrix consists of:
+                - The translational Jacobian (3xN) stacked on top of
+                - The rotational Jacobian (3xN).
+                If the Jacobian cannot be computed, a zero matrix of shape (6, N) is returned.
         """
         joint_positions = list(joint_positions)
 
         jac_t, jac_r = self.con.calculateJacobian(
-            self.robotId, self.end_effector_index, [0, 0, 0], joint_positions, self.zero_vec, self.zero_vec
+            self.robotId, self.end_effector_index, local_pos, joint_positions, self.zero_vec, self.zero_vec
         )
 
         # Ensure correct stacking of the Jacobian components

@@ -50,6 +50,7 @@ class URDFGen:
         mass = float(mass)
         ET.SubElement(inertial, 'mass', value=str(mass))
         ET.SubElement(inertial, 'inertia', **self.inertial_calculation(mass, link_len, link_width, type))
+        ET.SubElement(inertial, 'origin', xyz=' '.join(map(str, origin[:3])), rpy=' '.join(map(str, origin[3:])))
         
         visual = ET.SubElement(link, 'visual')
         ET.SubElement(visual, 'origin', xyz=' '.join(map(str, origin[:3])), rpy=' '.join(map(str, origin[3:])))
@@ -191,10 +192,10 @@ class URDFGen:
         """
         # Create a probe end effector
         self.robot.append(self.create_joint('probe_joint', parent, 'probe_link', [0, 0, last_link_length, 0, 0, 0], 'fixed'))
-        self.robot.append(self.create_link('probe_link', link_len=0.1, link_width=0.01, mass=1, collision=False))
+        self.robot.append(self.create_link('probe_link', link_len=0.1, link_width=0.01, mass=0, collision=False))
 
         self.robot.append(self.create_joint('end_effector_joint', 'probe_link', 'end_effector', [0, 0, 0.1, 0, 0, 0], 'fixed'))
-        self.robot.append(self.create_link('end_effector', link_len=0, link_width=0, mass=1, collision=False))
+        self.robot.append(self.create_link('end_effector', link_len=0, link_width=0, mass=0, collision=False))
     
     def create_manipulator(self, axes, joint_types, link_lens, joint_lims, link_shape='cylinder', collision=False, gripper=False):
         """
@@ -247,6 +248,7 @@ class URDFGen:
                 link_width = 0.05
 
             if joint_type == 'revolute':
+                # Create a visual representation of the joint
                 if axis == '1 0 0':
                     joint_viz_rot = [0, 1.57, 0]
                 elif axis == '0 1 0':
@@ -269,12 +271,13 @@ class URDFGen:
                                     type='cylinder', 
                                     link_len=0.125,
                                     link_width=0.06,
-                                    mass=1,
+                                    mass=0,
                                     origin=joint_viz_origin, 
                                     material=color_name, 
                                     color=color_code, 
                                     collision=False))
             
+            # Create the official joint and link
             self.robot.append(
                 self.create_joint(joint_name, 
                                   parent=parent_name, 
