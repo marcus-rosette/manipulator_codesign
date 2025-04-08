@@ -2,6 +2,7 @@ import numpy as np
 from manipulator_codesign.pyb_utils import PybUtils
 from manipulator_codesign.load_objects import LoadObjects
 from manipulator_codesign.load_robot import LoadRobot
+from manipulator_codesign.motion_planners import KinematicChainMotionPlanner
 from manipulator_codesign.sample_approach_points import sample_hemisphere_suface_pts, hemisphere_orientations
 
 
@@ -13,7 +14,7 @@ class PathCache:
             robot_urdf_path (str): filename/path to urdf file of robot
             renders (bool, optional): visualize the robot in the PyBullet GUI. Defaults to True.
         """
-        self.pyb = PybUtils(self, renders=renders)
+        self.pyb = PybUtils(renders=renders)
         self.object_loader = LoadObjects(self.pyb.con)
 
         self.robot_home_pos = robot_home_pos
@@ -23,6 +24,7 @@ class PathCache:
         self.start_pose = np.concatenate((start_position, start_orientation))
 
         self.ik_tol = ik_tol
+        self.motion_planner = KinematicChainMotionPlanner(self.robot)
 
     def find_high_manip_ik(self, points, num_hemisphere_points, look_at_point_offset, hemisphere_radius, num_configs_in_path=100, save_data=True, save_data_filename=None, path_filename=None):
         """ Find the inverse kinematic solutions that result in the highest manipulability
@@ -64,7 +66,7 @@ class PathCache:
 
             # Get IK solution for each target point on hemisphere and save the one with the highest manipulability 
             for target_position, target_orientation in zip(hemisphere_pts, hemisphere_oris):
-                joint_angles = self.robot.inverse_kinematics(target_position, target_orientation)
+                joint_angles = self.robot.inverse_kinematics((target_position, target_orientation))
 
                 self.robot.reset_joint_positions(joint_angles)
                 ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
@@ -81,7 +83,7 @@ class PathCache:
                     continue
 
                 # Interpolate a joint trajectory between the robot home position and the desired target configuration
-                path, collision_in_path = self.robot.interpolate_joint_trajectory(robot_home_pos, joint_angles, num_steps=num_configs_in_path)
+                path, collision_in_path = self.motion_planner.interpolate_joint_trajectory(robot_home_pos, joint_angles, num_steps=num_configs_in_path)
                 if collision_in_path:
                     continue
 
@@ -124,13 +126,13 @@ class PathCache:
 if __name__ == "__main__":
     render = False
     robot_home_pos = [np.pi/2, -np.pi/2, 2*np.pi/3, 5*np.pi/6, -np.pi/2, 0]
-    path_cache = PathCache(robot_urdf_path="./urdf/ur5e/ur5e.urdf", renders=render, robot_home_pos=robot_home_pos)
+    path_cache = PathCache(robot_urdf_path="/home/marcus/IMML/manipulator_codesign/manipulator_codesign/urdf/robots/ur5e/ur5e.urdf", renders=render, robot_home_pos=robot_home_pos)
 
     num_hemisphere_points = [27, 27]
     look_at_point_offset = 0.0
     hemisphere_radius = 0.15
 
-    voxel_data = np.loadtxt('./data/voxel_data_parallelepiped.csv')
+    voxel_data = np.loadtxt('./data/path_cache/voxel_data_parallelepiped.csv')
     voxel_centers = voxel_data[:, :3]
 
     # Translate voxels in front of robot

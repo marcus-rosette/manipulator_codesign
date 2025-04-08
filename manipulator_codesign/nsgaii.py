@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.spatial.transform import Rotation
 import pickle
+import time
 from pymoo.core.problem import Problem
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.operators.sampling.lhs import LatinHypercubeSampling
@@ -145,25 +146,66 @@ class KinematicChainProblem(Problem):
         out["F"] = F
 
 
+class TimeTrackingCallback:
+    def __init__(self, total_generations):
+        self.total_generations = total_generations
+        self.start_time = None
+
+    def __call__(self, algorithm):
+        if algorithm.n_gen == 1:
+            self.start_time = time.time()
+            print("=" * 45)
+            print(f"| Gen | Elapsed Time | Est. Remaining Time |")
+            print("=" * 45)
+            print(f'| 1/{self.total_generations} | --- | --- |')
+        elif self.start_time is not None:
+            elapsed = time.time() - self.start_time
+            avg_time_per_gen = elapsed / (algorithm.n_gen - 1)
+            remaining_gens = self.total_generations - algorithm.n_gen
+            est_remaining = avg_time_per_gen * remaining_gens
+
+            print(f"| {algorithm.n_gen}/{self.total_generations} | {elapsed:.1f}s | {est_remaining:.1f}s |")
+
+
 if __name__ == '__main__':
-    # Define target end-effector positions.
-    target_positions = np.random.uniform(low=[-2.0, -2.0, 0], high=[2.0, 2.0, 2.0], size=(20, 3)).tolist()
-    
+    num_targets = 50
+    num_generations = 100
+    population_size = 1000
+    num_offsprings = int(population_size / 2)
     min_joints, max_joints = 3, 7
-    problem = KinematicChainProblem(target_positions, min_joints=min_joints, max_joints=max_joints)
-    
+    callback = TimeTrackingCallback(num_generations)
+
+    # Define target end-effector positions.
+    target_positions = np.random.uniform(low=[-2.0, -2.0, 0], high=[2.0, 2.0, 2.0], size=(num_targets, 3)).tolist()
+
+    problem = KinematicChainProblem(
+        target_positions, 
+        min_joints=min_joints, 
+        max_joints=max_joints,
+        alpha=1.0,
+        beta=1.0,
+        delta=1.0,
+        gamma=1.0)
+
     # Configure the NSGA-II algorithm.
     algorithm = NSGA2(
-        pop_size=500,  # Increased population size
-        sampling=LatinHypercubeSampling(),  # More uniform initial sampling
-        crossover=SimulatedBinaryCrossover(prob=0.9, eta=15),  # Adjusted crossover parameters
-        mutation=PolynomialMutation(prob=1.0/problem.n_var, eta=20),  # Adjusted mutation parameters
-        n_offsprings=250,  # More offsprings per generation
+        pop_size=population_size,  
+        sampling=LatinHypercubeSampling(), 
+        crossover=SimulatedBinaryCrossover(prob=0.9, eta=15),  
+        mutation=PolynomialMutation(prob=1.0/problem.n_var, eta=20), 
+        n_offsprings=num_offsprings, 
         eliminate_duplicates=True
     )
     
     # Run the optimization.
-    res = minimize(problem, algorithm, termination=('n_gen', 50), seed=1, verbose=True)
+    res = minimize(
+        problem, 
+        algorithm, 
+        termination=('n_gen', num_generations), 
+        seed=1, 
+        verbose=False,
+        callback=callback
+    )
 
     # Define a dictionary to store relevant results
     results_dict = {
@@ -180,7 +222,7 @@ if __name__ == '__main__':
     storage_dir = '/home/marcus/IMML/manipulator_codesign/data/nsga2_results/'
 
     # Save results to a pickle file
-    with open(f"{storage_dir}nsga2_results.pkl", "wb") as f:
+    with open(f"{storage_dir}nsga2_results_large.pkl", "wb") as f:
         pickle.dump(results_dict, f)
 
-    print(f"Results saved to {storage_dir}nsga2_results.pkl")
+    print(f"Results saved to {storage_dir}nsga2_results_large.pkl")
