@@ -31,6 +31,9 @@ class KinematicChainProblem(Problem):
         self.beta = beta   # Joint torque penalty weight
         self.delta = delta  # Joint penalty weight
         self.gamma = gamma  # Conditioning index reward weight
+
+        # Number of objectives
+        self.n_obj = 6 
         
         # Define lower and upper bounds for the decision vector.
         joint_type_bounds = [0, 1]  # Joint type: 0 (revolute), 1 (prismatic)
@@ -41,7 +44,7 @@ class KinematicChainProblem(Problem):
         xl = [min_joints] + [joint_type_bounds[0], joint_axis_bounds[0], link_length_bounds[0]] * max_joints
         xu = [max_joints] + [joint_type_bounds[1], joint_axis_bounds[1], link_length_bounds[1]] * max_joints
         
-        super().__init__(n_var=len(xl), n_obj=4, n_constr=0, xl=np.array(xl), xu=np.array(xu))
+        super().__init__(n_var=len(xl), n_obj=self.n_obj, n_constr=0, xl=np.array(xl), xu=np.array(xu))
         
         self.backend = backend
         if self.backend == 'pybullet':
@@ -76,6 +79,10 @@ class KinematicChainProblem(Problem):
         raw_torques = np.zeros(n_ind)
         joint_counts = np.zeros(n_ind)
         conditioning_indices = np.zeros(n_ind)
+        manip_scores_rrmc = np.zeros(n_ind)
+        delta_joint_score_rrmc = np.zeros(n_ind)
+        raw_pos_errors_rrmc = np.zeros(n_ind)
+        raw_ori_errors_rrmc = np.zeros(n_ind)
         
         for i in range(n_ind):
             x = X[i, :]
@@ -96,17 +103,33 @@ class KinematicChainProblem(Problem):
             raw_torques[i] = chain.mean_torque
             joint_counts[i] = chain.num_joints
             conditioning_indices[i] = chain.global_conditioning_index
+            manip_scores_rrmc[i] = chain.mean_manip_score_rrmc
+            delta_joint_score_rrmc[i] = chain.mean_delta_joint_score_rrmc
+            raw_pos_errors_rrmc[i] = chain.mean_pos_error_rrmc
+            raw_ori_errors_rrmc[i] = chain.mean_ori_error_rrmc
             
             # Reset simulation to ensure a clean state for the next candidate.
             self.pyb.con.resetSimulation()
             self.pyb.enable_gravity()
         
-        # Compute dynamic normalization factors from the current population.
-        pose_error_norm = max(1e-6, np.max(raw_pose_errors))
-        torque_norm = max(1e-6, np.max(raw_torques))
+        # Compute dynamic normalization factors from the current population. ------------------- NOT WORKING TOO WELL
+        # pose_error_norm = max(1e-6, np.max(raw_pose_errors))
+        # torque_norm = max(1e-6, np.max(raw_torques))
+        # manip_score_rrmc_norm = max(1e-6, np.max(manip_scores_rrmc))
+        # delta_joint_score_rrmc_norm = max(1e-6, np.max(delta_joint_score_rrmc))
+        # pos_error_norm_rrmc = max(1e-6, np.max(raw_pos_errors_rrmc))
+        # ori_error_norm_rrmc = max(1e-6, np.max(raw_ori_errors_rrmc))
+
+        # Compute robust scale factors for each metric using IQR.
+        pose_error_norm = self.robust_log_normalize(raw_pose_errors)
+        torque_norm = self.robust_log_normalize(raw_torques)
+        manip_score_rrmc_norm = self.robust_log_normalize(manip_scores_rrmc)
+        delta_joint_score_rrmc_norm = self.robust_log_normalize(delta_joint_score_rrmc)
+        pos_error_norm_rrmc = self.robust_log_normalize(raw_pos_errors_rrmc)
+        ori_error_norm_rrmc = self.robust_log_normalize(raw_ori_errors_rrmc)
         
-        # Compute the four objectives for each candidate.
-        F = np.zeros((n_ind, 4))
+        # Compute the objectives for each candidate.
+        F = np.zeros((n_ind, self.n_obj))
         for i in range(n_ind):
 
             if exp_fit:
@@ -123,10 +146,20 @@ class KinematicChainProblem(Problem):
 
             else:
                 # ** Linear Normalization of Penalties**
-                normalized_pose_error = raw_pose_errors[i] / pose_error_norm
-                normalized_torque_penalty = raw_torques[i] / torque_norm
+                # normalized_pose_error = raw_pose_errors[i] / pose_error_norm
+                # normalized_torque_penalty = raw_torques[i] / torque_norm
                 joint_penalty = joint_counts[i] / self.max_joints
                 conditioning_index = conditioning_indices[i]
+                # normalized_manip_score_rrmc = manip_scores_rrmc[i] / manip_score_rrmc_norm
+                # normalized_delta_joint_score_rrmc = delta_joint_score_rrmc[i] / delta_joint_score_rrmc_norm
+                # normalized_pos_error_rrmc = raw_pos_errors_rrmc[i] / pos_error_norm_rrmc
+                # normalized_ori_error_rrmc = raw_ori_errors_rrmc[i] / ori_error_norm_rrmc
+                normalized_pose_error = pose_error_norm[i]
+                normalized_torque_penalty = torque_norm[i]
+                normalized_manip_score_rrmc = manip_score_rrmc_norm[i]
+                normalized_delta_joint_score_rrmc = delta_joint_score_rrmc_norm[i]
+                normalized_pos_error_rrmc = pos_error_norm_rrmc[i]
+                normalized_ori_error_rrmc = ori_error_norm_rrmc[i]
 
                 target_pose_error = 0.0
                 target_torque_error = 0.0
@@ -138,13 +171,79 @@ class KinematicChainProblem(Problem):
                 f3 = self.delta * abs(joint_penalty - target_joint_penalty)
                 f4 = self.gamma * abs(conditioning_index - target_conditioning)
 
+                # TODO: Define target values for resolved rate motion control (RRMC).
+                target_manip_score_rrmc = 4.0
+                target_delta_joint_score_rrmc = 0.0
+                target_pos_error_rrmc = 0.0
+                target_ori_error_rrmc = 0.0
+
+                manip_rrmc_scalar = 1.0
+                delta_joint_score_rrmc_scalar = 1.0
+                pos_error_rrmc_scalar = 1.0
+                ori_error_rrmc_scalar = 1.0
+
+                # f5 = manip_rrmc_scalar * abs(normalized_manip_score_rrmc - target_manip_score_rrmc)
+                # f6 = delta_joint_score_rrmc_scalar * abs(normalized_delta_joint_score_rrmc - target_delta_joint_score_rrmc)
+                # f7 = pos_error_rrmc_scalar * abs(normalized_pos_error_rrmc - target_pos_error_rrmc)
+                # f8 = ori_error_rrmc_scalar * abs(normalized_ori_error_rrmc - target_ori_error_rrmc)
+                f5 = normalized_manip_score_rrmc
+                f6 = normalized_delta_joint_score_rrmc
+                f7 = normalized_pos_error_rrmc
+                f8 = normalized_ori_error_rrmc
+
             F[i, 0] = f1
             F[i, 1] = f2
             F[i, 2] = f3
             F[i, 3] = f4
+
+            # Delta joint error
+            F[i, 4] = f6
+
+            # Position error 
+            F[i, 5] = f7
+
+            # F[i, 4] = f5
+            # F[i, 5] = f6
+            # F[i, 6] = f7
+            # F[i, 7] = f8
         
         out["F"] = F
 
+    @staticmethod
+    def robust_log_normalize(data):
+        """
+        Apply a logarithmic transformation to compress the scale and then perform min-max normalization.
+        
+        Parameters:
+            data (array-like): Input array of penalty values.
+        
+        Returns:
+            np.array: Normalized values between 0 and 1.
+        """
+        # Apply log1p to avoid issues with zero values
+        log_data = np.log1p(data)
+        
+        # Min-max normalization on the log-transformed data
+        min_val = np.min(log_data)
+        max_val = np.max(log_data)
+        
+        # Avoid division by zero in case max == min
+        if max_val - min_val < 1e-6:
+            return np.zeros_like(log_data)
+        
+        normalized = (log_data - min_val) / (max_val - min_val)
+        return normalized
+    
+    @staticmethod
+    def tanh_normalize_to_01(data):
+        mean = np.mean(data)
+        std = np.std(data)
+        
+        # Avoid division by zero
+        std = std if std != 0 else 1e-8
+
+        normalized = (1 + np.tanh((data - mean) / std)) / 2
+        return normalized
 
 class TimeTrackingCallback:
     def __init__(self, total_generations):
@@ -168,15 +267,15 @@ class TimeTrackingCallback:
 
 
 if __name__ == '__main__':
-    num_targets = 50
-    num_generations = 100
-    population_size = 1000
+    num_targets = 20
+    num_generations = 30
+    population_size = 100
     num_offsprings = int(population_size / 2)
-    min_joints, max_joints = 3, 7
+    min_joints, max_joints = 4, 7
     callback = TimeTrackingCallback(num_generations)
 
     # Define target end-effector positions.
-    target_positions = np.random.uniform(low=[-2.0, -2.0, 0], high=[2.0, 2.0, 2.0], size=(num_targets, 3)).tolist()
+    target_positions = np.random.uniform(low=[-2.0, 0, 0], high=[2.0, 2.0, 2.0], size=(num_targets, 3)).tolist()
 
     problem = KinematicChainProblem(
         target_positions, 
@@ -220,9 +319,10 @@ if __name__ == '__main__':
     }
 
     storage_dir = '/home/marcus/IMML/manipulator_codesign/data/nsga2_results/'
+    filename = f"{storage_dir}nsga2_results_rrmc_no_obj_scale.pkl"
 
     # Save results to a pickle file
-    with open(f"{storage_dir}nsga2_results_large.pkl", "wb") as f:
+    with open(filename, "wb") as f:
         pickle.dump(results_dict, f)
 
-    print(f"Results saved to {storage_dir}nsga2_results_large.pkl")
+    print(f"Results saved to {filename}")

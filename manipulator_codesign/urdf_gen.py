@@ -415,7 +415,7 @@ if __name__ == '__main__':
     # joint_types = [1, 1, 1, 1, 1]
     # link_lens = [0.5, 0.5, 0.5, 0.5, 0.5]
 
-    axes = ['y', 'x', 'z', 'y', 'x', 'y']
+    axes = ['z', 'x', 'y', 'z', 'x', 'y']
     joint_types = [1, 1, 1, 1, 1, 1]
     link_lens = [0.5, 0.5, 0.6, 0.4, 0.3, 0.2]
 
@@ -425,5 +425,5 @@ if __name__ == '__main__':
     # Map joint limits based on joint type
     joint_limits = [joint_limit_prismatic if jt == 0 else joint_limit_revolute for jt in joint_types]
                    
-    urdf_gen.create_manipulator(axes, joint_types, link_lens, link_shape='cylinder', joint_lims=joint_limits)
+    urdf_gen.create_manipulator(axes, joint_types, link_lens, link_shape='cylinder', joint_lims=joint_limits, collision=True)
     urdf_gen.save_urdf(robot_name)

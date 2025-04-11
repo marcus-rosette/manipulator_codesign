@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from scipy.spatial.transform import Slerp
 from scipy.spatial.transform import Rotation as R
 import pybullet_planning as pp
@@ -110,66 +111,119 @@ class KinematicChainMotionPlanner:
         return interpolated_configs, collision_in_path
     
     def resolved_rate_control(self, target_pose, alpha=0.01, max_steps=10000, tol=0.05,
-                            manipulability_gain=0.01, damping_lambda=0.1, beta=0.9, max_joint_vel=1.0):
+                            manipulability_gain=0.01, damping_lambda=0.1, beta=0.9, max_joint_vel=1.0,
+                            stall_patience=40, stall_vel_threshold=0.04, plot_manipulability=False):
         """
         Resolved-rate motion control with manipulability maximization and smoothing.
-
         Args:
             target_pose (tuple): (target_position, target_orientation)
             alpha (float): Scaling factor for joint velocity
-            damping_lambda (float): Damping factor for damped least squares
+            max_steps (int): Maximum number of iterations
+            tol (float): Tolerance for convergence. Used for position and orientation errors
+            manipulability_gain (float): Gain for manipulability nullspace biasing
+            damping_lambda (float): Damping factor for the damped least squares pseudoinverse
             beta (float): Velocity smoothing factor (low-pass filter)
             max_joint_vel (float): Maximum joint velocity (rad/s)
+            stall_patience (int): Number of steps to wait before considering motion stalled
+            stall_vel_threshold (float): Velocity threshold for stalling
+            plot_manipulability (bool): Whether to plot manipulability over time
+        Returns:
+            tuple: (final joint configuration as list, integrated manipulability over time)
+               if target pose is reached within tolerance, else (None, integrated manipulability).
         """
         dq_prev = np.zeros(len(self.robot.get_joint_positions()))  # For filtering
+        manipulability_history = []
+        joint_change_history = []
+        stall_counter = 0
 
         for step in range(max_steps):
             q = np.array(self.robot.get_joint_positions())
             J = self.robot.get_jacobian(q)
 
+            # Store manipulability
+            manipulability = self.robot.safe_manipulability(q)
+            manipulability_history.append(manipulability)
+
+            # ✅ Calculate current pose error
             current_pos, current_ori = self.robot.get_link_state(self.robot.end_effector_index)
             target_pos, target_ori = target_pose
+            pose_within_tol, pos_err_axis, pos_err_norm, ori_err_axis, ori_err_angle = self.robot.check_pose_within_tolerance(current_pos, current_ori, target_pos, target_ori, tol)
 
-            pos_err = np.array(target_pos) - np.array(current_pos)
-            ori_err = self.robot.con.getDifferenceQuaternion(current_ori, target_ori)
-            ori_axis, ori_angle = self.robot.con.getAxisAngleFromQuaternion(ori_err)
-
-            vel_ee = np.hstack((pos_err, np.array(ori_axis) * ori_angle))
+            vel_ee = np.hstack((pos_err_axis, np.array(ori_err_axis) * ori_err_angle))
 
             # ✅ Damped least squares pseudoinverse
+            # Make sure the Jacobian is square
             JT = J.T
             JJt = J @ JT
+            # Add damping term to help prevent instabilities (especially near singularities)
             lambda_I = damping_lambda**2 * np.eye(J.shape[0])
             J_pinv = JT @ np.linalg.inv(JJt + lambda_I)
 
-            dq_main = J_pinv @ vel_ee
+            dq_main = J_pinv @ vel_ee # Initial joint velocity command update
 
-            # ✅ Manipulability nullspace biasing
-            grad_w = self.manipulability_gradient(q)
+            # ✅ Nullspace biasing
             N = np.eye(len(q)) - J_pinv @ J
-            dq_bias = manipulability_gain * N @ grad_w
+            grad_w = self.manipulability_gradient(q)
+            dq_manip_bias = manipulability_gain * N @ grad_w
 
-            dq = dq_main + dq_bias
+            # ✅ Sum the bias terms with the primary command
+            dq = dq_main + dq_manip_bias
 
             # ✅ Clip joint velocities
             dq = np.clip(dq, -max_joint_vel, max_joint_vel)
 
-            # ✅ Exponential smoothing on dq
+            # ✅ Exponential smoothing on dq (low pass filter)
             dq_filtered = beta * dq + (1 - beta) * dq_prev
             dq_prev = dq_filtered
+
+            # Calculate change in joint angles for this step (delta_q = alpha * dq_filtered)
+            delta_q = alpha * dq_filtered
+            joint_change = np.linalg.norm(delta_q)
+            joint_change_history.append(joint_change)
 
             # ✅ Joint update
             q_new = q + alpha * dq_filtered
             self.robot.set_joint_configuration(q_new.tolist())
 
-            print(f"[INFO] Step {step}: Position Error: {np.linalg.norm(pos_err)}, Orientation Error: {np.abs(ori_angle)}")
+            # Text
+            self.robot.con.addUserDebugText(f"Manipulability: {manipulability:.4f}", [0.4, 0, 0], [0.5, 0.0, 0.8], 1.5, 0.1)
 
-            if np.linalg.norm(pos_err) < tol and np.abs(ori_angle) < tol:
-                print(f"[INFO] Converged in {step} steps.")
-                return q_new.tolist()
-        else:
-            print("[WARN] Max steps reached without full convergence.")
-            return None
+            # print(f"[INFO] Step {step}: Position Error: {np.linalg.norm(pos_err)}, Orientation Error: {np.abs(ori_err_angle)}")
+
+            # ✅ Check for convergence
+            if pose_within_tol:
+                # print(f"[INFO] Converged in {step} steps.")
+                break
+
+            # ✅ Check for motion stalling
+            if np.linalg.norm(dq_filtered) < stall_vel_threshold:
+                stall_counter += 1
+                if stall_counter >= stall_patience:
+                    # print(f"[WARN] Motion stalled for {stall_patience} consecutive steps. Terminating early.")
+                    break
+            else:
+                stall_counter = 0  # Reset if motion resumes
+        # else:
+        #     print("[WARN] Max steps reached without full convergence.")
+        
+        # Plot after control loop
+        if plot_manipulability:
+            plt.figure(figsize=(8, 4))
+            plt.plot(manipulability_history, label='Manipulability Index', color='dodgerblue')
+            plt.xlabel("Timestep")
+            plt.ylabel("Manipulability")
+            plt.title("Manipulability Over Time")
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            plt.tight_layout()
+            plt.show()
+
+        # Compute integrated scores using numerical integration (e.g., via the trapezoidal rule)
+        integrated_manipulability = np.trapz(manipulability_history) * alpha
+        integrated_joint_change = np.trapz(joint_change_history) * alpha
+
+        return q_new.tolist() if pose_within_tol else None, integrated_manipulability, integrated_joint_change, (pos_err_norm, ori_err_angle)
+        
     
     def interpolate_joint_trajectory2(self, start_config, end_config, num_steps):
         """

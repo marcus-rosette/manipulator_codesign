@@ -3,10 +3,11 @@ from tabulate import tabulate
 from scipy.linalg import svdvals
 import roboticstoolbox as rtb
 from spatialmath import SE3
+from scipy.spatial.transform import Rotation as R
 from manipulator_codesign.urdf_gen import URDFGen
 from manipulator_codesign.load_robot import LoadRobot
+from manipulator_codesign.motion_planners import KinematicChainMotionPlanner
 
-# TODO: How might the Energy Performance Index (EPI) bes used in a GA?
 
 # Base class with shared parameters and methods
 class KinematicChainBase:
@@ -121,9 +122,15 @@ class KinematicChainPyBullet(KinematicChainBase):
         self.mean_torque = None
         self.global_conditioning_index = None
         self.target_joint_positions = None
+        self.mean_manip_score_rrmc = None
+        self.mean_delta_joint_score_rrmc = None
+        self.mean_pos_error_rrmc = None
+        self.mean_ori_error_rrmc = None
 
         self.is_built = False
         self.is_loaded = False
+
+        self.default_joint_config = [0.0] * self.num_joints
 
     def build_robot(self):
         # Create a URDF for this chain.
@@ -138,7 +145,7 @@ class KinematicChainPyBullet(KinematicChainBase):
                                self.urdf_path, 
                                start_pos=[0, 0, 0], 
                                start_orientation=self.pyb_con.getQuaternionFromEuler([0, 0, 0]),
-                               home_config=[0] * self.num_joints,
+                               home_config=self.default_joint_config,
                                ee_link_name=self.ee_link_name,
                                collision_objects=[])
         self.is_loaded = True
@@ -152,6 +159,13 @@ class KinematicChainPyBullet(KinematicChainBase):
 
         # Compute the Global Conditioning Index (GCI) for the kinematic chain.
         self.global_conditioning_index = self.compute_global_conditioning_index(num_samples=50)
+
+        # Compute the manipulability score and delta joint score using resolved-rate motion control.
+        final_configs, manip_scores, delta_joint_scores, pose_errors_rrmc = zip(*[self.compute_resolved_rate_motion_control_fitness(target) for target in targets])
+        self.mean_manip_score_rrmc = np.mean(manip_scores)
+        self.mean_delta_joint_score_rrmc = np.mean(delta_joint_scores)
+        self.mean_pos_error_rrmc = np.mean(pose_errors_rrmc[0])
+        self.mean_ori_error_rrmc = np.mean(pose_errors_rrmc[1])
 
     def compute_pose_fitness(self, target, plan_rrt=False):
         """
@@ -179,51 +193,57 @@ class KinematicChainPyBullet(KinematicChainBase):
             target_quat = None
 
         # # Step 2: Reset the robot to home position
-        # self.robot.reset_joint_positions(self.robot.home_config)
+        # self.robot.reset_joint_positions()
 
         # Step 3: Quick reachability check (calculated the squared distance to avoid sqrt computation)
         max_reach_sq = np.sum(self.link_lengths) ** 2
         target_dist_sq = np.dot(target_pos, target_pos)  # Computes x^2 + y^2 + z^2
         if target_dist_sq > max_reach_sq:
-            return 1e6, [0.0] * self.num_joints
+            return 1e6, self.default_joint_config
 
         # TODO: how much tolerance should we allow?
         # Step 4: Compute IK
-        rest_config = self.robot.home_config
-        collision_free = False
-
         try:
-            # Attempt to find a collision-free solution
-            for attempt in range(5):  # Try to find a collision-free solution
-                joint_config = self.robot.inverse_kinematics(target, pos_tol=0.01, rest_config=rest_config, max_iter=200)
+            joint_config = self.robot.inverse_kinematics(target, pos_tol=0.01, rest_config=self.robot.home_config, max_iter=200, resample=True)
 
-                # Skip collision check if the joint configuration is invalid
-                if joint_config is None:
-                    continue  
+            if joint_config is self.default_joint_config:
+                return 1e6, self.default_joint_config
+            
+        # rest_config = self.robot.home_config
+        # collision_free = False
 
-                # Check for self-collision
-                self.robot.reset_joint_positions(joint_config)
-                if not self.robot.check_collision_aabb(self.robot.robotId, self.robot.robotId):
-                    collision_free = True
-                    break
+        # try:
+        #     # Attempt to find a collision-free solution
+        #     for attempt in range(5):  # Try to find a collision-free solution
+        #         joint_config = self.robot.inverse_kinematics(target, pos_tol=0.01, rest_config=rest_config, max_iter=200)
 
-                # Adjust rest configuration slightly to explore new solutions
-                # Modify the rest configuration slightly instead of random sampling
-                rest_config = np.clip(np.array(rest_config) + np.random.uniform(-0.05, 0.05, len(rest_config)),
-                                    self.robot.lower_limits, self.robot.upper_limits).tolist()
+        #         # Skip collision check if the joint configuration is invalid
+        #         if joint_config is None:
+        #             continue  
 
-            if not collision_free:
-                # print("Warning: Unable to find a collision-free IK solution.")
-                return 1e6, [0.0] * self.num_joints
+        #         # Check for self-collision
+        #         self.robot.reset_joint_positions(joint_config)
+        #         if not self.robot.check_collision_aabb(self.robot.robotId, self.robot.robotId):
+        #             collision_free = True
+        #             break
+
+        #         # Adjust rest configuration slightly to explore new solutions
+        #         # Modify the rest configuration slightly instead of random sampling
+        #         rest_config = np.clip(np.array(rest_config) + np.random.uniform(-0.05, 0.05, len(rest_config)),
+        #                             self.robot.lower_limits, self.robot.upper_limits).tolist()
+
+        #     if not collision_free:
+        #         # print("Warning: Unable to find a collision-free IK solution.")
+        #         return 1e6, self.default_joint_config
         except Exception as e:
             print("IK Error:", e)
-            return 1e6, [0.0] * self.num_joints
+            return 1e6, self.default_joint_config
         
         # Step 5: Set the configuration or plan a path using RRT
         if plan_rrt:
             joint_path = self.robot.rrt_path(self.robot.home_config, joint_config)
             if joint_path is None:
-                return 1e6, [0.0] * self.num_joints
+                return 1e6, self.default_joint_config
             # Execute the planned joint path
             self.robot.set_joint_path(joint_path)
         else:
@@ -335,6 +355,62 @@ class KinematicChainPyBullet(KinematicChainBase):
         gravity_torque_magnitude = np.linalg.norm(gravity_torque)
 
         return gravity_torque_magnitude
+    
+    def compute_resolved_rate_motion_control_fitness(self, target_pos, max_steps=400, alpha=0.5, manipulability_gain=0.1, stall_vel_threshold=0.1, stall_patience=10):
+        """
+        Compute the fitness of a resolved-rate motion control plan.
+
+        Args:
+            target_pos (list): The desired target position.
+            max_steps (int): Maximum number of simulation steps.
+            alpha (float): Weight for the manipulability term.
+            manipulability_gain (float): Gain for the manipulability term.
+            stall_vel_threshold (float): Threshold for stall velocity.
+            stall_patience (int): Number of steps to wait before considering a stall.
+
+        Returns:
+            tuple: Final joint configuration and fitness metrics.
+        """
+        # Initialize motion planner
+        motion_planner = KinematicChainMotionPlanner(self.robot)
+
+        # TODO: Add smart orientation selection based on target point. Currently only suited for approaches in positive y direction
+        # Compute the target pose (position and orientation)
+        target_orientations = [
+            np.array([90, 0, 180]), # front-back (+y)
+            np.array([180, 0, 90]), # top-down (-z)
+            np.array([0, 0, -90]), # bottom-up (+z)
+            np.array([90, 0, -90]), # right-left (-x)
+            np.array([90, 0, 90]), # left-right (+x)
+        ]
+
+        # Package poses
+        target_poses = [(target_pos, R.from_euler('xyz', target_ori, degrees=True).as_quat()) for target_ori in target_orientations]
+
+        # Check if the target pose is reachable via IK
+        results = [self.robot.is_pose_reachable(target_pose) for target_pose in target_poses]
+        reachabilities, joint_configs = zip(*results)
+
+        # Set the initial joint configuration (in front-back [+y] orientation)
+        self.robot.reset_joint_positions(joint_configs[0])
+
+        for i, reachable in enumerate(reachabilities):
+            if not reachable:
+                q_final = self.default_joint_config
+                manip_score = 0.0
+                delta_joint_score = 100
+                pose_error = 100
+                continue
+
+            q_final, manip_score, delta_joint_score, pose_error = motion_planner.resolved_rate_control(
+                                                                        target_poses[i], 
+                                                                        max_steps=max_steps,
+                                                                        plot_manipulability=False, 
+                                                                        alpha=alpha, 
+                                                                        manipulability_gain=manipulability_gain, 
+                                                                        stall_vel_threshold=stall_vel_threshold, 
+                                                                        stall_patience=stall_patience)
+        return q_final, manip_score, delta_joint_score, pose_error
 
     @staticmethod        
     def compute_pose_error(target_pose, actual_pose, weight_position=1.0, weight_orientation=1.0):

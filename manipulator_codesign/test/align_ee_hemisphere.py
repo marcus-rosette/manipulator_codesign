@@ -16,7 +16,7 @@ from sample_approach_points import prune_arc, sample_hemisphere_suface_pts, hemi
 
 class AlignHemisphere:
     def __init__(self, robot_urdf_path, robot_home_pos, renders: bool) -> None:
-        self.pyb = PybUtils(self, renders=renders)
+        self.pyb = PybUtils(renders=renders)
         self.object_loader = LoadObjects(self.pyb.con)
         self.robot = LoadRobot(self.pyb.con, robot_urdf_path, [0, 0, 0], self.pyb.con.getQuaternionFromEuler([0, 0, 0]), robot_home_pos)
 
@@ -66,11 +66,11 @@ class AlignHemisphere:
             # poi_id = self.pyb.con.loadURDF("sphere2.urdf", target_position, globalScaling=0.041, useFixedBase=True)
             self.pyb.con.resetBasePositionAndOrientation(sphere_id, target_position, [0, 0, 0, 1])
 
-            joint_angles = self.robot.inverse_kinematics(target_position, target_orientation)
+            joint_angles = self.robot.inverse_kinematics((target_position, target_orientation))
 
             self.robot.set_joint_positions(joint_angles)
 
-            manipulability = self.robot.calculate_manipulability(joint_angles, planar=False)
+            manipulability = self.robot.calculate_manipulability(joint_angles)
 
             if manipulability > max_manipulability:
                 best_config = joint_angles
@@ -117,6 +117,6 @@ class AlignHemisphere:
 if __name__ == '__main__':
     render = True
     robot_home_pos = [0, -np.pi/2, 0, -np.pi/2, 0, 0]
-    path_cache = AlignHemisphere(robot_urdf_path="./urdf/ur5e/ur5e.urdf", robot_home_pos=robot_home_pos, renders=render)
+    path_cache = AlignHemisphere(robot_urdf_path="/home/marcus/IMML/manipulator_codesign/manipulator_codesign/urdf/robots/ur5e/ur5e.urdf", robot_home_pos=robot_home_pos, renders=render)
 
     path_cache.test()
