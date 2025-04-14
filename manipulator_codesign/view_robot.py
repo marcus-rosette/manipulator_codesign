@@ -2,10 +2,11 @@ import os
 import argparse
 import numpy as np
 import time
-from scipy.spatial.transform import Rotation
+from scipy.spatial.transform import Rotation as R
 from manipulator_codesign.pyb_utils import PybUtils
 from manipulator_codesign.load_objects import LoadObjects
 from manipulator_codesign.load_robot import LoadRobot
+from manipulator_codesign.motion_planners import KinematicChainMotionPlanner
 
 
 def get_urdf_path(user_input, default_dir, default_file):
@@ -86,11 +87,43 @@ class ViewRobot:
             return
 
         # Execute the planned joint path
-        for joint_config in joint_path:
-            self.robot.set_joint_positions(joint_config)
-            for _ in range(240):
-                self.pyb.con.stepSimulation()
-                time.sleep(1. / 240.)
+        self.robot.set_joint_path(joint_path)
+
+    def test_resolved_rate_motion_control(self):
+        target_pos = [0, 1.5, 1.5]
+        motion_planner = KinematicChainMotionPlanner(self.robot)
+
+        target_orientations = [
+            np.array([180, 0, 90]), # top-down (-z)
+            np.array([0, 0, -90]), # bottom-up (+z)
+            np.array([90, 0, -90]), # right-left (-x)
+            np.array([90, 0, 90]), # left-right (+x)
+            np.array([90, 0, 180]), # front-back (+y)
+        ]
+
+        for target_ori in target_orientations:
+            target_ori = R.from_euler('xyz', target_ori, degrees=True).as_quat()
+            
+            q_final, manip_score, delta_joint_score, pose_error = motion_planner.resolved_rate_control(
+                                                                        (target_pos, target_ori), 
+                                                                        max_steps=400,
+                                                                        plot_manipulability=False, 
+                                                                        alpha=0.75, 
+                                                                        manipulability_gain=0.5, 
+                                                                        stall_vel_threshold=0.1, 
+                                                                        stall_patience=10)
+            print("\nManipulability score:", manip_score)
+            print("Delta joint score:", delta_joint_score)
+            print("Position error:", pose_error[0])
+            print("Orientation error:", pose_error[1])
+            print()
+
+            # if q_final:
+            #     self.robot.set_joint_configuration(q_final)
+        
+        print("Test complete. Press Ctrl+C to exit.")
+        while True:
+            self.pyb.con.stepSimulation()
 
     def main(self):
         target_positions = np.random.uniform(low=[-2.0, -2.0, 0], high=[2.0, 2.0, 2.0], size=(20, 3)).tolist()
@@ -113,10 +146,10 @@ class ViewRobot:
             self.robot.set_joint_configuration(self.robot.home_config)
         
             # Move arm to the target pose using inverse kinematics
-            joint_config = self.robot.inverse_kinematics(position, pos_tol=self.ik_tol, max_iter=1000)
+            joint_config = self.robot.inverse_kinematics(position, pos_tol=self.ik_tol, max_iter=1000, resample=False)
 
-            if self.robot.check_collision_aabb(self.robot.robotId, self.robot.robotId):
-                print("Collision detected!")
+            # if self.robot.check_collision_aabb(self.robot.robotId, self.robot.robotId):
+            #     print("Collision detected!")
             # joint_path = self.robot.optimized_rrt_path(self.robot.home_config, joint_config)
             # if joint_path is None:
             #     print("RRT path planning failed. Defaulting to plain IK.")
@@ -152,6 +185,7 @@ if __name__ == "__main__":
     
     robot_urdf_path = get_urdf_path(args.urdf_path, default_urdf_dir, default_urdf_file)
     ee_link_name = 'end_effector' if "best_chain" or 'test_robot' in robot_urdf_path else 'gripper_link'
+    # ee_link_name = 'tool0'
     
     robot_home_pos = None
 
@@ -163,4 +197,5 @@ if __name__ == "__main__":
                            ik_tol=0.1,
                            ee_link_name=ee_link_name)
     
-    view_robot.main()
+    view_robot.test_resolved_rate_motion_control()
+    # view_robot.main()

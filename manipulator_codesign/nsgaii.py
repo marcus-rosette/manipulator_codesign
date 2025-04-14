@@ -2,6 +2,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import pickle
 import time
+import os
+from datetime import datetime
 from pymoo.core.problem import Problem
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.operators.sampling.lhs import LatinHypercubeSampling
@@ -121,12 +123,12 @@ class KinematicChainProblem(Problem):
         # ori_error_norm_rrmc = max(1e-6, np.max(raw_ori_errors_rrmc))
 
         # Compute robust scale factors for each metric using IQR.
-        pose_error_norm = self.robust_log_normalize(raw_pose_errors)
-        torque_norm = self.robust_log_normalize(raw_torques)
-        manip_score_rrmc_norm = self.robust_log_normalize(manip_scores_rrmc)
-        delta_joint_score_rrmc_norm = self.robust_log_normalize(delta_joint_score_rrmc)
-        pos_error_norm_rrmc = self.robust_log_normalize(raw_pos_errors_rrmc)
-        ori_error_norm_rrmc = self.robust_log_normalize(raw_ori_errors_rrmc)
+        pose_error_norm = self.tanh_normalize_to_01(raw_pose_errors)
+        torque_norm = self.tanh_normalize_to_01(raw_torques)
+        manip_score_rrmc_norm = self.tanh_normalize_to_01(manip_scores_rrmc)
+        delta_joint_score_rrmc_norm = self.tanh_normalize_to_01(delta_joint_score_rrmc)
+        pos_error_norm_rrmc = self.tanh_normalize_to_01(raw_pos_errors_rrmc)
+        ori_error_norm_rrmc = self.tanh_normalize_to_01(raw_ori_errors_rrmc)
         
         # Compute the objectives for each candidate.
         F = np.zeros((n_ind, self.n_obj))
@@ -267,9 +269,12 @@ class TimeTrackingCallback:
 
 
 if __name__ == '__main__':
-    num_targets = 20
-    num_generations = 30
-    population_size = 100
+    # num_targets = 20
+    # num_generations = 50
+    # population_size = 500
+    num_targets = 10
+    num_generations = 10
+    population_size = 10
     num_offsprings = int(population_size / 2)
     min_joints, max_joints = 4, 7
     callback = TimeTrackingCallback(num_generations)
@@ -318,8 +323,15 @@ if __name__ == '__main__':
         "conditioning_weight": problem.gamma,
     }
 
+    # Define base storage directory and base filename
     storage_dir = '/home/marcus/IMML/manipulator_codesign/data/nsga2_results/'
-    filename = f"{storage_dir}nsga2_results_rrmc_no_obj_scale.pkl"
+    base_filename = "nsga2_results"
+
+    # Create timestamp string
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Compose full filename
+    filename = os.path.join(storage_dir, f"{base_filename}_{timestamp}.pkl")
 
     # Save results to a pickle file
     with open(filename, "wb") as f:
