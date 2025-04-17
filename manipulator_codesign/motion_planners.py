@@ -2,9 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Slerp
 from scipy.spatial.transform import Rotation as R
-import pybullet_planning as pp
-from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
-from pybullet_planning import cartesian_motion_planning
+# import pybullet_planning as pp
+# from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
+# from pybullet_planning import cartesian_motion_planning
 
 
 class KinematicChainMotionPlanner:

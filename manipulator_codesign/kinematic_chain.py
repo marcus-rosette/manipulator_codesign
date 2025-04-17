@@ -1,7 +1,6 @@
 import numpy as np
 from tabulate import tabulate
 from scipy.linalg import svdvals
-import roboticstoolbox as rtb
 from spatialmath import SE3
 from scipy.spatial.transform import Rotation as R
 from manipulator_codesign.urdf_gen import URDFGen
@@ -78,32 +77,32 @@ class KinematicChainBase:
         raise NotImplementedError("This method should be implemented in a subclass.")
 
 
-# --- Robotics Toolbox Implementation ---
-class KinematicChainRTB(KinematicChainBase):
-    def __init__(self, num_joints, joint_types, joint_axes, link_lengths, **kwargs):
-        super().__init__(num_joints, joint_types, joint_axes, link_lengths, **kwargs)
-        # Build the robot using the DH convention (RTB)
-        links = []
-        for i in range(self.num_joints):
-            if self.joint_types[i] == 1:  # Revolute joint
-                links.append(rtb.RevoluteDH(
-                    a=self.link_lengths[i] if self.joint_axes[i] in ['x', 'y'] else 0,
-                    d=self.link_lengths[i] if self.joint_axes[i] == 'z' else 0,
-                    alpha=0, offset=0,
-                    qlim=self.joint_limits[i]
-                ))
-            else:  # Prismatic joint
-                links.append(rtb.PrismaticDH(
-                    a=self.link_lengths[i] if self.joint_axes[i] in ['x', 'y'] else 0,
-                    theta=0, alpha=0, offset=0,
-                    qlim=(0, self.link_lengths[i])
-                ))
-        self.robot = rtb.DHRobot(links, name=self.robot_name)
+# # --- Robotics Toolbox Implementation ---
+# class KinematicChainRTB(KinematicChainBase):
+#     def __init__(self, num_joints, joint_types, joint_axes, link_lengths, **kwargs):
+#         super().__init__(num_joints, joint_types, joint_axes, link_lengths, **kwargs)
+#         # Build the robot using the DH convention (RTB)
+#         links = []
+#         for i in range(self.num_joints):
+#             if self.joint_types[i] == 1:  # Revolute joint
+#                 links.append(rtb.RevoluteDH(
+#                     a=self.link_lengths[i] if self.joint_axes[i] in ['x', 'y'] else 0,
+#                     d=self.link_lengths[i] if self.joint_axes[i] == 'z' else 0,
+#                     alpha=0, offset=0,
+#                     qlim=self.joint_limits[i]
+#                 ))
+#             else:  # Prismatic joint
+#                 links.append(rtb.PrismaticDH(
+#                     a=self.link_lengths[i] if self.joint_axes[i] in ['x', 'y'] else 0,
+#                     theta=0, alpha=0, offset=0,
+#                     qlim=(0, self.link_lengths[i])
+#                 ))
+#         self.robot = rtb.DHRobot(links, name=self.robot_name)
 
-    def compute_fitness(self, target):
-        # Use RTB’s inverse kinematics method.
-        ik_solution = self.robot.ikine_LM(SE3(target), tol=0.01, slimit=100, ilimit=10, joint_limits=True)
-        return ik_solution.residual  # Lower is better
+#     def compute_fitness(self, target):
+#         # Use RTB’s inverse kinematics method.
+#         ik_solution = self.robot.ikine_LM(SE3(target), tol=0.01, slimit=100, ilimit=10, joint_limits=True)
+#         return ik_solution.residual  # Lower is better
 
 
 # --- PyBullet Implementation ---
