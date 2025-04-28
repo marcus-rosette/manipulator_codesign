@@ -27,4 +27,6 @@ dependencies = [
     "spatialmath-python",
     # "roboticstoolbox-python",
     "tabulate",
+    "pymoo",
+    "ray"
 ]

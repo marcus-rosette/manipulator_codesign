@@ -166,7 +166,7 @@ class KinematicChainPyBullet(KinematicChainBase):
         self.mean_pos_error_rrmc = np.mean(pose_errors_rrmc[0])
         self.mean_ori_error_rrmc = np.mean(pose_errors_rrmc[1])
         # print("Mean Pose Error:", self.mean_pose_error)
-        print("\nMean pose error:", self.mean_pos_error_rrmc)
+        # print("\nMean pose error:", self.mean_pos_error_rrmc)
 
     def compute_pose_fitness(self, target, plan_rrt=False):
         """
