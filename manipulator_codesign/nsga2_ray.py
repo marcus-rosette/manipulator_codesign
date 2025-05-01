@@ -1,6 +1,5 @@
 import numpy as np
 import ray
-from scipy.spatial.transform import Rotation
 import pickle
 import time
 import os
@@ -68,7 +67,7 @@ def evaluate_individual(x, target_positions, min_joints, max_joints, alpha, beta
 class KinematicChainProblem(Problem):
     def __init__(self, target_positions, backend='pybullet', renders=False,
                  min_joints=2, max_joints=5,
-                 alpha=10.0, beta=0.1, delta=0.1, gamma=3.0):
+                 alpha=10.0, beta=0.1, delta=0.1, gamma=3.0, calibrate_samples=200):
         self.target_positions = np.array(target_positions)
         self.min_joints = min_joints
         self.max_joints = max_joints
@@ -83,6 +82,44 @@ class KinematicChainProblem(Problem):
         xu = [max_joints] + [1, 2, 0.75] * max_joints
         super().__init__(n_var=len(xl), n_obj=self.n_obj, n_constr=0,
                          xl=np.array(xl), xu=np.array(xu))
+        
+        # Prepare fixed normalization bounds
+        self.pose_bounds = (np.inf, -np.inf)
+        self.torque_bounds = (np.inf, -np.inf)
+        self.jcount_bounds = (min_joints, max_joints)
+        self.delta_rrmc_bounds = (np.inf, -np.inf)
+        self.pos_rrmc_bounds = (np.inf, -np.inf)
+
+        # Perform calibration
+        self.calibrate_normalization(calibrate_samples)
+
+    def calibrate_normalization(self, n_samples=200):
+        raw = {'pose': [], 'torque': [], 'jcount': [],
+               'delta_rrmc': [], 'pos_rrmc': []}
+
+        for _ in range(n_samples):
+            x = np.random.uniform(self.xl, self.xu)
+            # reuse remote evaluator locally (sequentially)
+            m = ray.get(evaluate_individual.remote(
+                x, self.target_positions,
+                self.min_joints, self.max_joints, alpha=self.alpha,
+                beta=self.beta, delta=self.delta, gamma=self.gamma,
+            ))
+            raw['pose'].append(m['pose_error'])
+            raw['torque'].append(m['torque'])
+            raw['jcount'].append(m['joint_count'])
+            raw['delta_rrmc'].append(m['delta_joint_score_rrmc'])
+            raw['pos_rrmc'].append(m['pos_error_rrmc'])
+
+        def bounds(arr):
+            lo, hi = np.min(arr), np.max(arr)
+            return (lo, hi if hi > lo else lo + 1e-6)
+
+        self.pose_bounds = bounds(raw['pose'])
+        self.torque_bounds = bounds(raw['torque'])
+        self.delta_rrmc_bounds = bounds(raw['delta_rrmc'])
+        self.pos_rrmc_bounds = bounds(raw['pos_rrmc'])
+        # jcount_bounds remains (min_joints, max_joints)
 
     def _evaluate(self, X, out, *args, **kwargs):
         n_ind = X.shape[0]
@@ -116,28 +153,40 @@ class KinematicChainProblem(Problem):
             raw_pose_errors[i] = m['pose_error']
             raw_torques[i] = m['torque']
             joint_counts[i] = m['joint_count']
-            conditioning_indices[i] = m['conditioning_index']
+            # conditioning_indices[i] = m['conditioning_index']
+            conditioning_indices[i] = abs(m['conditioning_index'] - 1.0)
             manip_scores_rrmc[i] = m['manip_score_rrmc']
             delta_joint_score_rrmc[i] = m['delta_joint_score_rrmc']
             raw_pos_errors_rrmc[i] = m['pos_error_rrmc']
             raw_ori_errors_rrmc[i] = m['ori_error_rrmc']
 
-        # Normalize
-        pose_error_norm = self.tanh_normalize_to_01(raw_pose_errors)
-        torque_norm = self.tanh_normalize_to_01(raw_torques)
-        delta_joint_norm = self.tanh_normalize_to_01(delta_joint_score_rrmc)
-        pos_error_norm = self.tanh_normalize_to_01(raw_pos_errors_rrmc)
+        p_lo, p_hi = self.pose_bounds
+        t_lo, t_hi = self.torque_bounds
+        d_lo, d_hi = self.delta_rrmc_bounds
+        pr_lo, pr_hi = self.pos_rrmc_bounds
+
+        # # Normalize
+        # pose_error_norm = self.tanh_normalize_to_01(raw_pose_errors)
+        # torque_norm = self.tanh_normalize_to_01(raw_torques)
+        # delta_joint_norm = self.tanh_normalize_to_01(delta_joint_score_rrmc)
+        # pos_error_norm = self.tanh_normalize_to_01(raw_pos_errors_rrmc)
 
         # Compute objectives
         F = np.zeros((n_ind, self.n_obj))
         for i in range(n_ind):
-            f1 = self.alpha * pose_error_norm[i]
-            f2 = self.beta * torque_norm[i]
-            f3 = self.delta * (joint_counts[i] / self.max_joints)
-            f4 = self.gamma * abs(conditioning_indices[i] - 1)
-            f5 = delta_joint_norm[i]
-            f6 = pos_error_norm[i]
-            F[i, :] = [f1, f2, f3, f4, f5, f6]
+            # f1 = self.alpha * pose_error_norm[i]
+            # f2 = self.beta * torque_norm[i]
+            # f3 = self.delta * (joint_counts[i] / self.max_joints)
+            # f4 = self.gamma * abs(conditioning_indices[i] - 1)
+            # f5 = delta_joint_norm[i]
+            # f6 = pos_error_norm[i]
+            # F[i, :] = [f1, f2, f3, f4, f5, f6]
+            F[i, 0] = self.alpha * self.lin_norm(raw_pose_errors[i], p_lo, p_hi)
+            F[i, 1] = self.beta  * self.lin_norm(raw_torques[i], t_lo, t_hi)
+            F[i, 2] = self.delta * self.lin_norm(joint_counts[i], *self.jcount_bounds)
+            F[i, 3] = self.gamma * conditioning_indices[i]
+            F[i, 4] = self.lin_norm(delta_joint_score_rrmc[i], d_lo, d_hi)
+            F[i, 5] = self.lin_norm(raw_pos_errors_rrmc[i], pr_lo, pr_hi)
         out['F'] = F
 
     @staticmethod
@@ -145,6 +194,11 @@ class KinematicChainProblem(Problem):
         mean = np.mean(data)
         std = np.std(data) if np.std(data) != 0 else 1e-8
         return (1 + np.tanh((data - mean) / std)) / 2
+    
+    @staticmethod
+    def lin_norm(a, lo, hi):
+        # linear normalization
+        return np.clip((a - lo) / max(1e-8, hi - lo), 0.0, 1.0)
 
 
 class TimeTrackingCallback:
@@ -169,8 +223,8 @@ if __name__ == '__main__':
 
     # Experiment params
     num_targets = 10
-    num_generations = 10
-    population_size = 100
+    num_generations = 5
+    population_size = 10
     num_offsprings = population_size // 2
     min_joints, max_joints = 4, 7
 
@@ -180,7 +234,7 @@ if __name__ == '__main__':
 
     problem = KinematicChainProblem(
         target_positions, min_joints=min_joints, max_joints=max_joints,
-        alpha=1.0, beta=1.0, delta=1.0, gamma=1.0
+        calibrate_samples=30, alpha=1.0, beta=1.0, delta=1.0, gamma=1.0
     )
 
     algorithm = NSGA2(

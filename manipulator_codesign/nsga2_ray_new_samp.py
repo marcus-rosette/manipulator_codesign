@@ -22,7 +22,7 @@ from manipulator_codesign.kinematic_chain import KinematicChainPyBullet
 from manipulator_codesign.load_objects import LoadObjects
 
 # Initialize Ray
-ray.init(ignore_reinit_error=True)
+# ray.init(ignore_reinit_error=True)
 @ray.remote
 def evaluate_individual(x, target_positions, min_j, max_j):
     client = p.connect(p.DIRECT)
@@ -185,7 +185,7 @@ class KinematicChainProblem(Problem):
 if __name__ == '__main__':
     targets = np.random.uniform([-2,0,0],[2,2,2],(10,3)).tolist()
     min_j, max_j = 4, 7
-    pop, gens = 5, 20
+    pop, gens = 5, 2
     problem   = KinematicChainProblem(targets, min_j, max_j)
     sampling  = MixedSampling(problem.mask)
     crossover = MixedSBX(problem.mask)
