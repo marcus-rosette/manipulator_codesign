@@ -1,4 +1,6 @@
 import numpy as np
+from collections import defaultdict
+import re
 
 
 class LoadRobot:
@@ -24,24 +26,35 @@ class LoadRobot:
         self.collision_objects = collision_objects
         self.ee_link_name = ee_link_name
 
+        # will hold groups of revolute indices, *and* the following fixed joint idx
+        self.spherical_groups = {}       # key = first revolute idx, value = fixed_joint_idx
+        self.spherical_joint_idx = []    # list of [ix, iy, iz] triples
+        
         self.setup_robot()
 
     def setup_robot(self):
         """ Initialize robot
         """
         assert self.robotId is None
-        flags = self.con.URDF_USE_SELF_COLLISION | self.con.URDF_USE_INERTIA_FROM_FILE #| self.con.URDF_USE_SELF_COLLISION_INCLUDE_PARENT 
+        flags = self.con.URDF_USE_SELF_COLLISION | self.con.URDF_USE_INERTIA_FROM_FILE
 
         self.robotId = self.con.loadURDF(self.robot_urdf_path, self.start_pos, self.start_orientation, useFixedBase=True, flags=flags)
         self.num_joints = self.con.getNumJoints(self.robotId)
 
         self.end_effector_index = self.get_end_effector_index(self.ee_link_name)
 
-        self.controllable_joint_idx = [
-            self.con.getJointInfo(self.robotId, joint)[0]
-            for joint in range(self.num_joints)
-            if self.con.getJointInfo(self.robotId, joint)[2] in {self.con.JOINT_REVOLUTE, self.con.JOINT_PRISMATIC}
-        ]
+        # All controllable revolute/prismatic joints
+        self.controllable_joint_idx = []
+        self.controllable_joint_types = []
+
+        for joint in range(self.num_joints):
+            joint_info = self.con.getJointInfo(self.robotId, joint)
+            if joint_info[2] in {self.con.JOINT_REVOLUTE, self.con.JOINT_PRISMATIC}:
+                self.controllable_joint_idx.append(joint_info[0])
+                self.controllable_joint_types.append(joint_info[2])
+
+        # Detect spherical groups *and* record the fixed joint after them
+        self._disable_spherical_joint_collisions()
 
         # Extract joint limits from urdf
         self.joint_limits = [self.con.getJointInfo(self.robotId, i)[8:10] for i in self.controllable_joint_idx]
@@ -59,6 +72,93 @@ class LoadRobot:
 
         # Get the starting end-effector pos
         self.home_ee_pos, self.home_ee_ori = self.get_link_state(self.end_effector_index)
+
+    def _disable_spherical_joint_collisions(self):
+        """
+        Detect revolute triplets named _x_N, _y_N, _z_N,
+        find the fixed joint immediately after them,
+        disable collision between the before/after links,
+        and record both the triple and that fixed-joint idx.
+        """
+        p = self.con
+        base_name = p.getBodyInfo(self.robotId)[0].decode()
+
+        # 1) Gather all joint & link info in flat dicts
+        joint_info = {}      # name -> {idx, type, parent_link, child_link}
+        link_name_to_idx = {base_name: -1}
+
+        for j in range(self.num_joints):
+            info = p.getJointInfo(self.robotId, j)
+            name = info[1].decode()
+            jtype = info[2]
+            parent_idx = info[16]  # link-index of parent
+            child_name = info[12].decode()
+
+            # record link-index for child links
+            link_name_to_idx[child_name] = j
+
+            parent_name = next(
+                (n for n, idx in link_name_to_idx.items() if idx == parent_idx),
+                base_name
+            )
+
+            joint_info[name] = {
+                'idx': j,
+                'type': jtype,
+                'parent_link': parent_name,
+                'child_link': child_name,
+            }
+
+        # 2) Collect revolute triplets (_x_N, _y_N, _z_N)
+        suffix_map = defaultdict(lambda: {'x':None, 'y':None, 'z':None})
+        pat = re.compile(r'^(.*)_(x|y|z)_(\d+)$')
+
+        for name, data in joint_info.items():
+            if data['type'] == p.JOINT_REVOLUTE:
+                m = pat.match(name)
+                if m:
+                    axis, num = m.group(2), int(m.group(3))
+                    suffix_map[num][axis] = name
+
+        # Reset storage
+        self.spherical_joint_idx = []
+        self.spherical_groups = {}
+
+        # 3) For each complete triplet, find the fixed joint and disable collision
+        for N, axes in suffix_map.items():
+            if not all(axes.values()):
+                continue
+
+            # joint indices for x,y,z
+            ix = joint_info[axes['x']]['idx']
+            iy = joint_info[axes['y']]['idx']
+            iz = joint_info[axes['z']]['idx']
+            self.spherical_joint_idx.append([ix, iy, iz])
+
+            # find the fixed joint whose parent_link == child_link of z-axis revolute
+            after_z = joint_info[axes['z']]['child_link']
+            fixed_idx = next(
+                (dat['idx']
+                for nm, dat in joint_info.items()
+                if dat['type'] == p.JOINT_FIXED and dat['parent_link'] == after_z),
+                None
+            )
+            if fixed_idx is None:
+                raise RuntimeError(f"Could not find fixed joint after '{after_z}' (sph #{N})")
+
+            self.spherical_groups[ix] = fixed_idx
+
+            # disable collision between before_x parent link and the fixed-link
+            before_x = joint_info[axes['x']]['parent_link']
+            i0 = link_name_to_idx.get(before_x, -1)
+            if i0 >= 0:
+                p.setCollisionFilterPair(
+                    self.robotId, self.robotId,
+                    linkIndexA=i0, linkIndexB=fixed_idx,
+                    enableCollision=0
+                )
+            else:
+                print(f"[warn] couldn't disable collision {before_x}↔{fixed_idx}")
 
     def get_end_effector_index(self, target_names=None):
         """
@@ -187,10 +287,6 @@ class LoadRobot:
         angle = 2 * np.arccos(np.clip(q_relative[0], -1.0, 1.0))
         return angle
     
-    # def check_pose_within_tolerance(self, final_position, final_orientation, target_position, target_orientation, pos_tolerance, ori_tolerance):
-    #     pos_diff = np.linalg.norm(np.array(final_position) - np.array(target_position))
-    #     ori_diff = np.pi - self.quaternion_angle_difference(np.array(target_orientation), np.array(final_orientation))
-    #     return pos_diff <= pos_tolerance and np.abs(ori_diff) <= ori_tolerance
     def check_pose_within_tolerance(self, current_pos, current_ori, target_pos, target_ori, tol=0.01):
         pos_err_axis = np.array(target_pos) - np.array(current_pos)
         pos_err_norm = np.linalg.norm(pos_err_axis)

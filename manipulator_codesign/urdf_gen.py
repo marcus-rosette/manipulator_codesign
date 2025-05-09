@@ -18,6 +18,7 @@ class URDFGen:
         """
         # TODO: Add a cache clearing method for emptying the tmp/ dir
         self.robot = ET.Element('robot', name=robot_name)
+        self.spherical_joint_count = 0  # <--- Track how many have been added
 
         if save_urdf_dir is None:
             current_working_directory = os.getcwd()
@@ -165,6 +166,54 @@ class URDFGen:
             tmpfile.write(pretty_string)
             
         return tmp_file_path
+    
+    def add_mock_spherical_joint(self, parent, origin, color, color_name, joint_name_prefix="sph", radius=0.06, joint_limits=[-3.14, 3.14]):
+        """
+        Adds a mock spherical joint composed of three stacked revolute joints (x, y, z axes)
+        and a final link with a sphere visual. All joints share the same origin and have no collisions.
+
+        Args:
+            parent (str): The name of the link to which the spherical joint attaches.
+            joint_name_prefix (str): Prefix for the joint names. Default is "sph".
+            sphere_link_name (str): Name of the final link with a visual-only sphere.
+            link_radius (float): Radius of the sphere. Default is 0.06.
+            joint_limits (list): Rotation limits for each revolute joint. Default is full rotation [-π, π].
+        """
+        # Axis order: x, y, z
+        axes = ['1 0 0', '0 1 0', '0 0 1']
+
+        sphere_joint = []
+        for i, axis in enumerate(axes):
+            if i != 0:
+                origin = [0, 0, 0, 0, 0, 0]
+
+            joint_suffix = f"_{self.spherical_joint_count + 1}"
+            joint_name = f"{joint_name_prefix}_joint_{['x', 'y', 'z'][i]}{joint_suffix}"
+            child_link = f"{joint_name_prefix}_link_{['x', 'y', 'z'][i]}{joint_suffix}"
+
+            joint = self.create_joint(joint_name, parent, child_link,
+                                    origin=origin,
+                                    joint_type='revolute',
+                                    axis=axis,
+                                    limit=joint_limits)
+            sphere_joint.append(joint)
+
+            # Add an empty visual-only link with no collision
+            link = self.create_link(name=child_link,
+                                    type='sphere',
+                                    link_len=radius,
+                                    link_width=radius,
+                                    mass=0.001,
+                                    material=color_name,
+                                    color=color,
+                                    collision=False)
+            sphere_joint.append(link)
+
+            parent = child_link  # Stack the next joint on this child      
+
+        self.spherical_joint_count += 1 
+            
+        return sphere_joint, parent
         
     def add_custom_gripper(self, parent, last_link_length):
         # TODO: Need to update functionality for changing shape_dim to just the link lengths
@@ -197,7 +246,7 @@ class URDFGen:
         self.robot.append(self.create_joint('end_effector_joint', 'probe_link', 'end_effector', [0, 0, 0.1, 0, 0, 0], 'fixed'))
         self.robot.append(self.create_link('end_effector', link_len=0, link_width=0, mass=0, collision=False))
     
-    def create_manipulator(self, axes, joint_types, link_lens, joint_lims, link_shape='cylinder', collision=False, gripper=False):
+    def create_manipulator(self, axes, joint_types, link_lens, joint_lims, link_width=0.05, link_shape='cylinder', collision=False, gripper=False):
         """
         Creates a manipulator robot model with specified parameters.
 
@@ -213,8 +262,6 @@ class URDFGen:
         Returns:
             None
         """
-        # TODO: Need to verify collision mapping. Note -> validate through doing a collision check with pybullet
-
         axes = [self.map_axis_input(axis) for axis in axes]
         joint_types = [self.map_joint_type(joint_type) for joint_type in joint_types]
         colors = {name: mcolors.to_rgba(color) for name, color in random.sample(list(mcolors.CSS4_COLORS.items()), len(mcolors.CSS4_COLORS))}
@@ -239,13 +286,6 @@ class URDFGen:
             color_name, color_code = list(colors.items())[i]
             joint_name = f'joint{i}'
             child_name = f'link{i}'
-
-            if joint_type == 'prismatic':
-                parent_length += 0.005
-                link_width = 0.05
-                # collision = False
-            else:
-                link_width = 0.05
 
             if joint_type == 'revolute':
                 # Create a visual representation of the joint
@@ -278,24 +318,48 @@ class URDFGen:
                                     collision=False))
             
             # Create the official joint and link
-            self.robot.append(
-                self.create_joint(joint_name, 
-                                  parent=parent_name, 
-                                  child=child_name, 
-                                  joint_type=joint_type, 
-                                  axis=axis,
-                                  limit=joint_limit, 
-                                  origin=[0, 0, parent_length, 0, 0, 0]))
+            if joint_type == 'spherical':
+                sphere_radius = 0.1
+                spherical_joint, sphere_link = self.add_mock_spherical_joint(
+                                                    parent=parent_name,
+                                                    radius=sphere_radius,
+                                                    origin=[0, 0, parent_length, 0, 0, 0],
+                                                    color_name=color_name,
+                                                    color=color_code,
+                                                    )
+                self.robot.extend(spherical_joint)
+
+                # update parent
+                parent_name   = sphere_link
+                parent_length = sphere_radius
+
+                # now connect the sphere to link{i} with a fixed joint
+                self.robot.append(
+                    self.create_joint(joint_name,
+                                    parent=parent_name,
+                                    child=child_name,
+                                    origin=[0,0,0,0,0,0],
+                                    joint_type='fixed')
+                )
+            else:
+                self.robot.append(
+                    self.create_joint(joint_name, 
+                                    parent=parent_name, 
+                                    child=child_name, 
+                                    joint_type=joint_type, 
+                                    axis=axis,
+                                    limit=joint_limit, 
+                                    origin=[0, 0, parent_length, 0, 0, 0]))
             self.robot.append(
                 self.create_link(child_name, 
-                                 type=link_shape, 
-                                 link_len=child_length,
-                                 link_width=link_width,
-                                 origin=[0, 0, child_length / 2, 0, 0, 0], 
-                                 material=color_name, 
-                                 color=color_code, 
-                                 collision=collision))
-            
+                                type=link_shape, 
+                                link_len=child_length,
+                                link_width=link_width,
+                                origin=[0, 0, child_length / 2, 0, 0, 0], 
+                                material=color_name, 
+                                color=color_code, 
+                                collision=collision))
+        
             parent_name = child_name
             parent_length = child_length
         
@@ -411,13 +475,9 @@ if __name__ == '__main__':
     robot_name = 'test_robot'
     urdf_gen = URDFGen(robot_name)
 
-    # axes = ['y', 'x', 'y', 'x', 'x']
-    # joint_types = [1, 1, 1, 1, 1]
-    # link_lens = [0.5, 0.5, 0.5, 0.5, 0.5]
-
-    axes = ['z', 'x', 'y', 'z', 'x', 'y']
-    joint_types = [1, 1, 1, 1, 1, 1]
-    link_lens = [0.5, 0.5, 0.6, 0.4, 0.3, 0.2]
+    axes = ['z', 'y', 'z', 'x']
+    joint_types = [1, 1, 1, 1]
+    link_lens = [0.75, 0.7, 0.7, 0.1]
 
     joint_limit_prismatic = (-0.5, 0.5)
     joint_limit_revolute = (-3.14, 3.14)

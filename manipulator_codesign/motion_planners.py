@@ -27,6 +27,28 @@ class KinematicChainMotionPlanner:
             w1 = self.robot.safe_manipulability(q_delta)
             grad[i] = (w1 - w0) / delta
         return grad
+    
+    def joint_limit_avoidance_gradient(self, joint_positions, margin=0.5):
+        """
+        Compute a repulsive gradient pushing joints away from their limits.
+        The closer to a limit, the stronger the gradient.
+        """
+        grad = np.zeros_like(joint_positions)
+        for i, q in enumerate(joint_positions):
+            q_min = self.robot.lower_limits[i]
+            q_max = self.robot.upper_limits[i]
+            q_range = q_max - q_min
+            q_center = (q_max + q_min) / 2.0
+            buffer = margin * q_range
+
+            # Repulsive gradient (e.g., quadratic or inverse barrier function)
+            if q < q_min + buffer:
+                grad[i] = (q_min + buffer - q) / (buffer**2)
+            elif q > q_max - buffer:
+                grad[i] = (q_max - buffer - q) / (buffer**2)
+            else:
+                grad[i] = 0
+        return grad
 
     def shortest_angular_distance(self, start_configuration, end_configuration):
         """
@@ -110,9 +132,9 @@ class KinematicChainMotionPlanner:
 
         return interpolated_configs, collision_in_path
     
-    def resolved_rate_control(self, target_pose, alpha=0.01, max_steps=10000, tol=0.05,
-                            manipulability_gain=0.01, damping_lambda=0.1, beta=0.9, max_joint_vel=1.0,
-                            stall_patience=40, stall_vel_threshold=0.04, plot_manipulability=False):
+    def resolved_rate_control(self, target_pose, alpha=0.75, max_steps=10000, tol=0.05,
+                            manipulability_gain=0.1, damping_lambda=0.15, beta=0.9, max_joint_vel=1.0,
+                            stall_patience=10, stall_vel_threshold=0.1, plot_manipulability=False):
         """
         Resolved-rate motion control with manipulability maximization and smoothing.
         Args:
@@ -161,6 +183,7 @@ class KinematicChainMotionPlanner:
 
             dq_main = J_pinv @ vel_ee # Initial joint velocity command update
 
+            #TODO: Do I need to do joint limit avoidance here?
             # ✅ Nullspace biasing
             N = np.eye(len(q)) - J_pinv @ J
             grad_w = self.manipulability_gradient(q)
@@ -168,6 +191,16 @@ class KinematicChainMotionPlanner:
 
             # ✅ Sum the bias terms with the primary command
             dq = dq_main + dq_manip_bias
+            # ✅ Nullspace biasing
+            # N = np.eye(len(q)) - J_pinv @ J
+            # grad_w = self.manipulability_gradient(q)
+            # grad_joint_limits = self.joint_limit_avoidance_gradient(q)
+
+            # dq_manip_bias = manipulability_gain * N @ grad_w
+            # dq_limit_bias = manipulability_gain * N @ grad_joint_limits 
+
+            # # ✅ Sum the bias terms with the primary command
+            # dq = dq_main + dq_manip_bias + dq_limit_bias
 
             # ✅ Clip joint velocities
             dq = np.clip(dq, -max_joint_vel, max_joint_vel)

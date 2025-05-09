@@ -18,12 +18,13 @@ def decode_decision_vector(x, min_joints=2, max_joints=5):
     
     joint_types, joint_axes, link_lengths = [], [], []
     axis_map = {0: 'x', 1: 'y', 2: 'z'}
-    
+    type_map = {0: 'prismatic', 1: 'revolute', 2: 'spherical'} 
+
     for i in range(num_joints):
         idx = 3 * i + 1
         joint_type = int(np.rint(x[idx]))
-        joint_type = min(1, max(0, joint_type))
-        joint_types.append(joint_type)
+        joint_type = min(2, max(0, joint_type))
+        joint_types.append(type_map[joint_type])
         
         joint_axis = int(np.rint(x[idx + 1]))
         joint_axis = min(2, max(0, joint_axis))

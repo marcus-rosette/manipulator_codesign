@@ -168,8 +168,9 @@ class KinematicChainProblem(Problem):
         self.min_joints, self.max_joints = min_joints, max_joints
         self.alpha, self.beta, self.delta, self.gamma = alpha, beta, delta, gamma
         n_obj = 6
+        # Decision vector bounds: [num_joints] + [type, axis, length] * max_joints
         xl = [min_joints] + [0, 0, 0.1] * max_joints
-        xu = [max_joints] + [1, 2, 0.75] * max_joints
+        xu = [max_joints] + [2, 2, 0.75] * max_joints
         super().__init__(n_var=len(xl), n_obj=n_obj, xl=np.array(xl), xu=np.array(xu))
 
         # normalization bounds
