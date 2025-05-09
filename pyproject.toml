@@ -28,5 +28,7 @@ dependencies = [
     # "roboticstoolbox-python",
     "tabulate",
     "pymoo",
-    "ray"
+    "ray",
+    "pandas",
+    "wandb"
 ]
