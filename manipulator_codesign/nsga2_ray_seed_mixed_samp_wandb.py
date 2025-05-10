@@ -278,6 +278,11 @@ if __name__ == "__main__":
     targets = np.random.uniform([-2,0,0],[2,2,2],(5,3)).tolist()
     problem = KinematicChainProblem(targets)
 
+    api_key = os.environ.get("d288a191279e100a7ce3c441856e6b356eab2f48")
+    if api_key is None:
+        raise RuntimeError("Please set WANDB_API_KEY in your environment")
+    wandb.login(key=api_key)
+
     # Initialize W&B
     wandb.init(
         project="manipulator_codesign",
