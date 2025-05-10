@@ -93,28 +93,29 @@ def urdf_to_decision_vector(urdf_path):
 
     return len(types), types, axes, lengths
 
-def encode_seed(dec_vec, max_joints=7, min_j=2, max_j=7):
+def encode_seed(dec_vec, max_joints=7, min_j=2):
     """
     Turn the output of urdf_to_decision_vector:
        (n_joints, types, axes, lengths)
-    into a 1D numpy array [n_joints, type0, axis0, len0, type1, axis1, len1, ...],
+    into a 1D numpy array [n_joints, type0, axis0, len0, …],
     padded out to max_joints with a safe “fallback” design.
     """
     n_joints, types, axes, lengths = dec_vec
 
-    # 1) a mapping from your string-types to integer codes
+    # 1) mapping from your string‐types to integer codes
     type_map = {
        'revolute': 0,
        'prismatic': 1,
        'spherical': 2
     }
 
-    # 2) a mapping from axis‐vectors to the integer codes your problem uses.
-    #    Here I assume you only ever see pure principal axes.
+    # 2) mapping from axis‐vectors to the integer codes your problem uses,
+    #    plus a special code for spherical
     axis_map = {
       (1, 0, 0): 0,
       (0, 1, 0): 1,
-      (0, 0, 1): 2
+      (0, 0, 1): 2,
+      'spherical': 3
     }
 
     vec = []
@@ -123,21 +124,27 @@ def encode_seed(dec_vec, max_joints=7, min_j=2, max_j=7):
 
     # for each actual joint, append [type_id, axis_id, length]
     for t, a, L in zip(types, axes, lengths):
-        try:
-            t_id = type_map[t]
-        except KeyError:
-            raise ValueError(f"Unknown joint type {t!r}")
-        a_key = tuple(int(round(x)) for x in a)
+        # map joint‐type string → integer
+        t_id = type_map[t]
+
+        # special‐case spherical joints:
+        if t == 'spherical':
+            a_key = 'spherical'
+        else:
+            # for revolute/prismatic: a is a tuple of floats
+            a_key = tuple(int(round(x)) for x in a)
+
+        # look up our integer code
         try:
             a_id = axis_map[a_key]
         except KeyError:
             raise ValueError(f"Axis vector {a!r} not one of principal axes")
+
         vec.extend([float(t_id), float(a_id), float(L)])
 
-    # if we have fewer than max_joints, pad out
-    #   (choose any valid fallback; here I pick [min_j, 0, .1])
+    # pad out to exactly max_joints
     while len(vec) < 1 + 3*max_joints:
-        vec.extend([float(min_j), 0., 0.1])
+        vec.extend([float(min_j), 0.0, 0.1])
 
     return np.asarray(vec, dtype=float)
 
