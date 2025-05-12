@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 
 from manipulator_codesign.pyb_utils import PybUtils
 from manipulator_codesign.load_robot import LoadRobot
+from manipulator_codesign.urdf_gen import URDFGen
 
 
 def parse_cylinder_lengths(urdf_path):
@@ -93,7 +94,7 @@ def urdf_to_decision_vector(urdf_path):
 
     return len(types), types, axes, lengths
 
-def encode_seed(dec_vec, max_joints=7, min_j=2):
+def encode_seed(dec_vec, min_joints=4, max_joints=7):
     """
     Turn the output of urdf_to_decision_vector:
        (n_joints, types, axes, lengths)
@@ -102,49 +103,36 @@ def encode_seed(dec_vec, max_joints=7, min_j=2):
     """
     n_joints, types, axes, lengths = dec_vec
 
-    # 1) mapping from your string‐types to integer codes
-    type_map = {
-       'revolute': 0,
-       'prismatic': 1,
-       'spherical': 2
-    }
-
-    # 2) mapping from axis‐vectors to the integer codes your problem uses,
-    #    plus a special code for spherical
-    axis_map = {
-      (1, 0, 0): 0,
-      (0, 1, 0): 1,
-      (0, 0, 1): 2,
-      'spherical': 3
-    }
-
     vec = []
-    # first variable: how many joints
+    # 1) number of joints
     vec.append(float(n_joints))
 
-    # for each actual joint, append [type_id, axis_id, length]
+    # 2) encode each real joint
     for t, a, L in zip(types, axes, lengths):
-        # map joint‐type string → integer
-        t_id = type_map[t]
+        # joint-type code via centralized inverse
+        t_id = URDFGen.map_joint_type_inverse(t)
 
-        # special‐case spherical joints:
+        # spherical has its own code
         if t == 'spherical':
-            a_key = 'spherical'
+            a_id = 3
         else:
-            # for revolute/prismatic: a is a tuple of floats
-            a_key = tuple(int(round(x)) for x in a)
-
-        # look up our integer code
-        try:
-            a_id = axis_map[a_key]
-        except KeyError:
-            raise ValueError(f"Axis vector {a!r} not one of principal axes")
+            # turn e.g. (1,0,0) into "1 0 0"
+            axis_str = f"{int(round(a[0]))} {int(round(a[1]))} {int(round(a[2]))}"
+            a_id = URDFGen.map_axis_inverse(axis_str)
 
         vec.extend([float(t_id), float(a_id), float(L)])
 
-    # pad out to exactly max_joints
-    while len(vec) < 1 + 3*max_joints:
-        vec.extend([float(min_j), 0.0, 0.1])
+    # 3) pad out inactive slots (ensure we have 1 + 3 * max_joints in decision vector)
+    pad_t = URDFGen.map_joint_type_inverse('prismatic')
+    pad_axis_str = URDFGen.map_axis_input('x')  # default to x-axis
+    pad_a = URDFGen.map_axis_inverse(pad_axis_str)
+
+    while len(vec) < 1 + 3 * max_joints:
+        vec.extend([
+            float(pad_t),  # prismatic
+            float(pad_a),  # x-axis
+            0.1            # minimal length
+        ])
 
     return np.asarray(vec, dtype=float)
 

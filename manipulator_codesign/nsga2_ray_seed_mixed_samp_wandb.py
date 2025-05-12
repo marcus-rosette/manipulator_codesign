@@ -12,7 +12,6 @@ from pymoo.core.sampling import Sampling
 from pymoo.core.crossover import Crossover
 from pymoo.core.mutation import Mutation
 from pymoo.operators.sampling.lhs import LatinHypercubeSampling
-from pymoo.operators.sampling.rnd import IntegerRandomSampling
 from pymoo.operators.crossover.sbx import SimulatedBinaryCrossover
 from pymoo.operators.crossover.ux import UniformCrossover
 from pymoo.operators.mutation.pm import PolynomialMutation
@@ -26,7 +25,6 @@ from manipulator_codesign.load_objects import LoadObjects
 
 
 # -------- Seeded & Mixed Operators --------
-
 class SeededSampling(Sampling):
     def __init__(self, var_types, seeds, fallback_sampler):
         super().__init__()
@@ -52,13 +50,18 @@ class MixedSampling(Sampling):
         super().__init__()
         self.var_types = var_types
         self.lhs = LatinHypercubeSampling()
-        self.int_sampler = IntegerRandomSampling()
+
     def _do(self, problem, n_samples, **kwargs):
+        # 1) first generate the “real” vars
         X = self.lhs._do(problem, n_samples, **kwargs)
-        Xi = self.int_sampler._do(problem, n_samples, **kwargs)
+
+        # 2) now overwrite all integer slots with true randint [xl, xu] inclusive
         for i, t in enumerate(self.var_types):
             if t != 'real':
-                X[:, i] = Xi[:, i]
+                lo, hi = int(problem.xl[i]), int(problem.xu[i])
+                # +1 on hi to make it inclusive
+                X[:, i] = np.random.randint(lo, hi + 1, size=n_samples)
+
         return X
 
 
@@ -126,7 +129,6 @@ class MixedMutation(Mutation):
 
 
 # -------- Remote Evaluation --------
-
 @ray.remote
 def evaluate_individual(x, targets, min_j, max_j, alpha, beta, delta, gamma):
     import pybullet as p, pybullet_data
@@ -154,7 +156,6 @@ def evaluate_individual(x, targets, min_j, max_j, alpha, beta, delta, gamma):
 
 
 # -------- Problem Definition --------
-
 class KinematicChainProblem(Problem):
     def __init__(self, targets, min_joints=2, max_joints=7,
                  alpha=1, beta=1, delta=1, gamma=1, cal_samples=15):
@@ -219,7 +220,6 @@ class KinematicChainProblem(Problem):
 
 
 # -------- W&B Callback --------
-
 class WandbLogger(Callback):
     def __init__(self):
         super().__init__()
@@ -238,18 +238,7 @@ class WandbLogger(Callback):
         log_dict = {"generation": self.gen}
         log_dict.update({obj_names[i]: mean_obj[i] for i in range(F.shape[1])})
         log_dict.update({obj_names[i]: best_obj[i] for i in range(F.shape[1])})
-        # log_dict["pareto_size"] = len(algorithm.opt.get("F"))
         wandb.log(log_dict, step=self.gen)
-
-        # # optional: scatter two objectives (0 vs.1)
-        # pareto_F = algorithm.opt.get("F")
-        # df = pd.DataFrame(pareto_F, columns=[f"obj_{i}" for i in range(F.shape[1])])
-        # table = wandb.Table(dataframe=df)
-        # wandb.log({
-        #     "pareto_scatter": wandb.plot.scatter(
-        #         table, "obj_0", "obj_1", title=f"Gen {self.gen} Pareto"
-        #     )
-        # }, step=self.gen)
 
         self.gen += 1
 
@@ -261,9 +250,14 @@ if __name__ == "__main__":
 
     # set up operators
     max_joints = 7
+    num_generations = 1
+    num_population = 5
+    num_target_pts = 5
     var_types = ['int'] + ['int','int','real'] * max_joints
 
-    urdf_dir = 'manipulator_codesign/urdf/robots/nsga2_seeds'
+    # Find the nsga2_seeds directory relative to this script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    urdf_dir = os.path.join(script_dir, 'urdf', 'robots', 'nsga2_seeds')
     urdfs = [os.path.join(urdf_dir, f) for f in os.listdir(urdf_dir) if f.endswith('.urdf')]
     raw_seeds = [urdf_to_decision_vector(u) for u in urdfs]
     seeds     = [encode_seed(s, max_joints=max_joints) for s in raw_seeds]
@@ -275,10 +269,10 @@ if __name__ == "__main__":
                               prob_real=1.0/(1+3*max_joints),
                               prob_int=0.1)
 
-    targets = np.random.uniform([-2,0,0],[2,2,2],(5,3)).tolist()
+    targets = np.random.uniform([-2,0,0],[2,2,2],(num_target_pts,3)).tolist()
     problem = KinematicChainProblem(targets)
 
-    api_key = os.environ.get("d288a191279e100a7ce3c441856e6b356eab2f48")
+    api_key = os.environ.get("WANDB_API_KEY")
     if api_key is None:
         raise RuntimeError("Please set WANDB_API_KEY in your environment")
     wandb.login(key=api_key)
@@ -289,8 +283,8 @@ if __name__ == "__main__":
         entity="rosettem-oregon-state-university",
         name=f"nsga2_run_{datetime.now():%Y%m%d_%H%M%S}",
         config={
-            "pop_size": 10,
-            "n_gen": 10,
+            "pop_size": num_population,
+            "n_gen": num_generations,
             "min_joints": problem.min_joints,
             "max_joints": problem.max_joints,
             "alpha": problem.alpha,
@@ -304,7 +298,7 @@ if __name__ == "__main__":
     )
 
     callback = WandbLogger()
-    algo = NSGA2(pop_size=10,
+    algo = NSGA2(pop_size=num_population,
                  sampling=sampling,
                  crossover=crossover,
                  mutation=mutation,
@@ -312,7 +306,7 @@ if __name__ == "__main__":
 
     res = minimize(problem,
                    algo,
-                   termination=('n_gen', 10),
+                   termination=('n_gen', num_generations),
                    seed=1,
                    verbose=True,
                    callback=callback)

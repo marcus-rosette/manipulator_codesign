@@ -214,6 +214,56 @@ class URDFGen:
         self.spherical_joint_count += 1 
             
         return sphere_joint, parent
+    
+    def create_joint_visual(self, parent_name, parent_length, axis, index, color_name, color_code):
+        """
+        Creates a small fixed 'cylinder' joint visualization for a revolute joint.
+
+        Args:
+            parent_name (str): name of the link to attach the viz to
+            parent_length (float): offset along Z from parent link
+            axis (str): axis string, e.g. '1 0 0' or '0 1 0'
+            index (int): joint index (for naming)
+            color_name (str): material/color identifier
+            color_code (tuple): RGBA color tuple
+        """
+        # determine orientation so the cylinder aligns with the revolute axis
+        if axis == '1 0 0':
+            viz_rot = [0, 1.57, 0]
+        elif axis == '0 1 0':
+            viz_rot = [1.57, 0, 0]
+        else:
+            viz_rot = [0, 0, 0]
+        origin = [0, 0, 0] + viz_rot
+
+        ball_joint_name      = f'joint_viz{index}'
+        ball_joint_link_name = f'joint_viz_link{index}'
+
+        # fixed joint to “attach” the viz to the parent
+        self.robot.append(
+            self.create_joint(
+                name=ball_joint_name,
+                parent=parent_name,
+                child=ball_joint_link_name,
+                joint_type='fixed',
+                origin=[0, 0, parent_length, 0, 0, 0]
+            )
+        )
+
+        # little cylinder representing the joint
+        self.robot.append(
+            self.create_link(
+                name=ball_joint_link_name,
+                type='cylinder',
+                link_len=0.125,
+                link_width=0.06,
+                mass=0,
+                origin=origin,
+                material=color_name,
+                color=color_code,
+                collision=False
+            )
+        )
         
     def add_custom_gripper(self, parent, last_link_length):
         # TODO: Need to update functionality for changing shape_dim to just the link lengths
@@ -262,7 +312,7 @@ class URDFGen:
         Returns:
             None
         """
-        axes = [self.map_axis_input(axis) for axis in axes]
+        axes = [self.map_axis_input(axis) if isinstance(axis, int) else axis for axis in axes]
         joint_types = [self.map_joint_type(joint_type) for joint_type in joint_types]
         colors = {name: mcolors.to_rgba(color) for name, color in random.sample(list(mcolors.CSS4_COLORS.items()), len(mcolors.CSS4_COLORS))}
         
@@ -288,34 +338,8 @@ class URDFGen:
             child_name = f'link{i}'
 
             if joint_type == 'revolute':
-                # Create a visual representation of the joint
-                if axis == '1 0 0':
-                    joint_viz_rot = [0, 1.57, 0]
-                elif axis == '0 1 0':
-                    joint_viz_rot = [1.57, 0, 0]
-                else:
-                    joint_viz_rot = [0, 0, 0]
-                joint_viz_origin = [0, 0, 0]
-                joint_viz_origin.extend(joint_viz_rot)
-
-                ball_joint_name = f'joint_viz{i}'
-                ball_joint_link_name = f'joint_viz_link{i}'
-                self.robot.append(
-                    self.create_joint(ball_joint_name, 
-                                    parent=parent_name, 
-                                    child=ball_joint_link_name, 
-                                    joint_type='fixed', 
-                                    origin=[0, 0, parent_length, 0, 0, 0]))
-                self.robot.append(
-                    self.create_link(ball_joint_link_name, 
-                                    type='cylinder', 
-                                    link_len=0.125,
-                                    link_width=0.06,
-                                    mass=0,
-                                    origin=joint_viz_origin, 
-                                    material=color_name, 
-                                    color=color_code, 
-                                    collision=False))
+                # Create a small fixed 'cylinder' joint visualization for the revolute joint
+                self.create_joint_visual(parent_name, parent_length, axis, i, color_name, color_code)
             
             # Create the official joint and link
             if joint_type == 'spherical':
@@ -397,7 +421,7 @@ class URDFGen:
     @staticmethod
     def map_axis_input(input_axis):
         """
-        Maps input axis 'x', 'y', 'z' to '1 0 0', '0 1 0', '0 0 1', respectively.
+        Maps input axis 0 (x), 1 (y), 2 (z) to '1 0 0', '0 1 0', '0 0 1', respectively.
 
         Args:
             input_axis (str): The input axis ('x', 'y', 'z').
@@ -406,11 +430,16 @@ class URDFGen:
             str: The corresponding axis in the format 'x y z'.
         """
         axis_mapping = {
-            'x': '1 0 0',
-            'y': '0 1 0',
-            'z': '0 0 1'
+            0: '1 0 0',
+            1: '0 1 0',
+            2: '0 0 1'
         }
         return axis_mapping.get(input_axis, '0 0 0')
+    
+    @staticmethod
+    def map_axis_inverse(vec_str: str) -> int:
+        inv = {'1 0 0': 0, '0 1 0': 1, '0 0 1': 2}
+        return inv.get(vec_str, 0)
     
     @staticmethod
     def map_joint_type(input_joint_type):
@@ -435,6 +464,31 @@ class URDFGen:
             3: 'fixed'
         }
         return joint_type_mapping.get(input_joint_type, 'revolute')
+    
+    @staticmethod
+    def map_joint_type_inverse(name: str) -> int:
+        """
+        Maps a joint type name to its corresponding integer code.
+
+        Args:
+            name (str): The name of the joint type. 
+                Valid values are 'prismatic', 'revolute', 'spherical', and 'fixed'.
+
+        Returns:
+            int: The integer code corresponding to the joint type.
+                - 0: 'prismatic'
+                - 1: 'revolute'
+                - 2: 'spherical'
+                - 3: 'fixed'
+                Defaults to 1 ('revolute') if the name is not recognized.
+        """
+        inv = {v:k for k,v in {
+            0: 'prismatic',
+            1: 'revolute',
+            2: 'spherical',
+            3: 'fixed'
+        }.items()}
+        return inv.get(name, 1)
     
     @staticmethod
     def inertial_calculation(mass, link_length, link_width, type='cylinder'):
@@ -475,8 +529,8 @@ if __name__ == '__main__':
     robot_name = 'test_robot'
     urdf_gen = URDFGen(robot_name)
 
-    axes = ['z', 'y', 'z', 'x']
-    joint_types = [1, 1, 1, 1]
+    axes = [0, 1, 2, 0]
+    joint_types = [1, 1, 2, 1]
     link_lens = [0.75, 0.7, 0.7, 0.1]
 
     joint_limit_prismatic = (-0.5, 0.5)
