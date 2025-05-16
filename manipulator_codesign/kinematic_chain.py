@@ -107,7 +107,7 @@ class KinematicChainBase:
 
 # --- PyBullet Implementation ---
 class KinematicChainPyBullet(KinematicChainBase):
-    def __init__(self, pyb_con, num_joints, joint_types, joint_axes, link_lengths, ee_link_name='end_effector', **kwargs):
+    def __init__(self, pyb_con, num_joints, joint_types, joint_axes, link_lengths, ee_link_name='end_effector', collision_objects=[], **kwargs):
         """
         pyb_con: A connection object from your PyBullet utilities.
         """
@@ -116,11 +116,13 @@ class KinematicChainPyBullet(KinematicChainBase):
         self.ee_link_name = ee_link_name
         self.urdf_path = None
         self.robot = None
+        self.collision_objects = collision_objects
 
         self.mean_pose_error = None
         self.mean_torque = None
         self.global_conditioning_index = None
         self.target_joint_positions = None
+        self.mean_rrt_path_cost = None
         self.mean_manip_score_rrmc = None
         self.mean_delta_joint_score_rrmc = None
         self.mean_pos_error_rrmc = None
@@ -146,13 +148,20 @@ class KinematicChainPyBullet(KinematicChainBase):
                                start_orientation=self.pyb_con.getQuaternionFromEuler([0, 0, 0]),
                                home_config=self.default_joint_config,
                                ee_link_name=self.ee_link_name,
-                               collision_objects=[])
+                               collision_objects=self.collision_objects)
         self.is_loaded = True
+
+        # Initialize motion planner
+        self.motion_planner = KinematicChainMotionPlanner(self.robot)
 
     def compute_chain_metrics(self, targets):
         # Compute the mean pose error and mean torque for the given targets.
         pose_errors, self.target_joint_positions = zip(*[self.compute_pose_fitness(target) for target in targets])
         self.mean_pose_error = np.mean(pose_errors)
+
+        # Compute the rrt path cost for the target joint positions.
+        rrt_path_costs = [self.compute_rrt_path_cost(joint_positions, collision_objects=self.collision_objects) for joint_positions in self.target_joint_positions]
+        self.mean_rrt_path_cost = np.mean(rrt_path_costs)
 
         self.mean_torque = np.mean([self.compute_gravity_torque_magnitute(joint_positions) for joint_positions in self.target_joint_positions])
 
@@ -165,10 +174,8 @@ class KinematicChainPyBullet(KinematicChainBase):
         self.mean_delta_joint_score_rrmc = np.mean(delta_joint_scores)
         self.mean_pos_error_rrmc = np.mean(pose_errors_rrmc[0])
         self.mean_ori_error_rrmc = np.mean(pose_errors_rrmc[1])
-        # print("Mean Pose Error:", self.mean_pose_error)
-        # print("\nMean pose error:", self.mean_pos_error_rrmc)
 
-    def compute_pose_fitness(self, target, plan_rrt=False):
+    def compute_pose_fitness(self, target_pose):
         """
         Compute the fitness of the robot's configuration by solving the inverse kinematics (IK) problem.
 
@@ -186,50 +193,44 @@ class KinematicChainPyBullet(KinematicChainBase):
         float: The computed fitness value. A lower value indicates a better fit. If an error occurs during
                IK computation, a large fitness value (1e6) is returned.
         """
-        # Step 1: Check if there is a target orientation (quaternion)
-        if len(target) == 2:
-            target_pos, target_quat = target
-        else:
-            target_pos = target
-            target_quat = None
-
-        # # Step 3: Quick reachability check (calculated the squared distance to avoid sqrt computation)
-        # max_reach_sq = np.sum(self.link_lengths) ** 2
-        # target_dist_sq = np.dot(target_pos, target_pos)  # Computes x^2 + y^2 + z^2
-        # if target_dist_sq > max_reach_sq:
-        #     return 1e6, self.default_joint_config
-
-        # # TODO: how much tolerance should we allow?
-        # # Step 4: Compute IK
-        # try:
-        joint_config = self.robot.inverse_kinematics(target, pos_tol=0.01, rest_config=self.robot.home_config, max_iter=200, resample=True)
-
-        #     if joint_config is self.default_joint_config:
-        #         return 1e6, self.default_joint_config
-        # except Exception as e:
-        #     print("IK Error:", e)
-        #     return 1e6, self.default_joint_config
+        # TODO: how much tolerance should we allow?
+        # Step 4: Compute IK
+        joint_config = self.robot.inverse_kinematics(target_pose, pos_tol=0.01, rest_config=self.robot.home_config, max_iter=200, resample=True)
         
-        # Step 5: Set the configuration or plan a path using RRT
-        if plan_rrt:
-            joint_path = self.robot.rrt_path(self.robot.home_config, joint_config)
-            if joint_path is None:
-                return 1e6, self.default_joint_config
-            # Execute the planned joint path
-            self.robot.set_joint_path(joint_path)
-        else:
-            # Reset the robot to home position and set the target joint configuration
-            # self.robot.set_joint_configuration(self.robot.home_config)
-            self.robot.set_joint_configuration(joint_config)
-
-        # Get the end-effector position and orientation at the target joint configuration
+        # drive the robot to that config (for measurement)
+        self.robot.set_joint_configuration(joint_config)
         ee_pos, ee_ori = self.robot.get_link_state(self.robot.end_effector_index)
 
-        if target_quat is not None:
-            error = self.compute_pose_error(target, (ee_pos, ee_ori), weight_position=2.0, weight_orientation=0.25)
+        # compute error
+        if isinstance(target_pose, tuple) and len(target_pose) == 2:
+            # return self.compute_pose_error(target_pose, (ee_pos,ee_ori), weight_position=2.0, weight_orientation=0.25), joint_config
+            target_pos, target_quat = target_pose
+            _, _, pos_err_norm, _, ori_err_angle = self.robot.check_pose_within_tolerance(
+            current_pos=ee_pos,
+            current_ori=ee_ori,
+            target_pos=target_pos,
+            target_ori=target_quat,
+            tol=0.0
+            )
         else:
-            error = np.linalg.norm(np.array(target) - np.array(ee_pos))
-        return error, joint_config
+            return np.linalg.norm(np.array(target_pose) - np.array(ee_pos)), joint_config
+        
+    def compute_rrt_path_cost(self, target_config, home_config=None, collision_objects=[]):
+        """
+        Plan an RRT path from home_config → q_goal and
+        return its joint‐space length (or a big penalty if no path).
+        """
+        home = home_config or self.robot.home_config
+
+        path = self.motion_planner.rrt_path(home, target_config, collision_objects, rrt_iter=500)
+        if path is None:
+            return 1e3   # no collision-free path found
+
+        # path cost = sum of successive L2 distances
+        cost = 0.0
+        for a, b in zip(path[:-1], path[1:]):
+            cost += np.linalg.norm(np.array(a) - np.array(b))
+        return cost
     
     def compute_motion_plan_fitness(self, pose_waypoints):
         """
@@ -284,7 +285,7 @@ class KinematicChainPyBullet(KinematicChainBase):
             ])
 
             # Set the robot to this configuration
-            self.robot.reset_joint_positions(list(random_config))
+            self.robot.set_joint_configuration(list(random_config))
 
             # Compute the Jacobian
             J = np.array(self.robot.get_jacobian(list(random_config)))
@@ -317,7 +318,7 @@ class KinematicChainPyBullet(KinematicChainBase):
             float: The magnitude of the gravity torque.
         """
         # Set the joint positions
-        self.robot.reset_joint_positions(joint_positions)
+        self.robot.set_joint_configuration(joint_positions)
 
         # Compute the gravity torque
         gravity_torque = self.robot.inverse_dynamics(joint_positions)
@@ -342,16 +343,14 @@ class KinematicChainPyBullet(KinematicChainBase):
         Returns:
             tuple: Final joint configuration and fitness metrics.
         """
-        # Initialize motion planner
-        motion_planner = KinematicChainMotionPlanner(self.robot)
-
         # TODO: Add smart orientation selection based on target point. Currently only suited for approaches in positive y direction
         # Compute the target pose (position and orientation)
         target_orientations = [
-            np.array([90, 0, 180]), # front-back (+y)
             np.array([180, 0, 90]), # top-down (-z)
+            np.array([90, 0, 180]), # front-back (+y)
             np.array([0, 0, -90]), # bottom-up (+z)
             np.array([90, 0, -90]), # right-left (-x)
+            np.array([90, 0, 180]), # front-back (+y)
             np.array([90, 0, 90]), # left-right (+x)
         ]
 
@@ -363,7 +362,7 @@ class KinematicChainPyBullet(KinematicChainBase):
         reachabilities, joint_configs = zip(*results)
 
         # Set the initial joint configuration (in front-back [+y] orientation)
-        self.robot.reset_joint_positions(joint_configs[0])
+        self.robot.set_joint_configuration(joint_configs[0])
 
         # Initialize variables to store the final results
         q_final = np.zeros((len(target_poses), self.num_joints))
@@ -371,14 +370,7 @@ class KinematicChainPyBullet(KinematicChainBase):
         delta_joint_score = np.zeros(len(target_poses))
         pose_error = np.zeros((len(target_poses), 2))
         for i, reachable in enumerate(reachabilities):
-            # if not reachable:
-            #     q_final[i, :] = self.default_joint_config
-            #     manip_score[i] = 0.0
-            #     delta_joint_score[i] = 100
-            #     pose_error[i, :] = (100, 100)
-            #     continue
-
-            q_final[i, :], manip_score[i], delta_joint_score[i], pose_error[i, :] = motion_planner.resolved_rate_control(
+            q_final[i, :], manip_score[i], delta_joint_score[i], pose_error[i, :] = self.motion_planner.resolved_rate_control(
                                                                         target_poses[i], 
                                                                         max_steps=max_steps,
                                                                         plot_manipulability=False, 

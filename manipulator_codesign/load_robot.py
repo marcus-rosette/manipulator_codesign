@@ -1,6 +1,7 @@
 import numpy as np
 from collections import defaultdict
 import re
+import time
 
 
 class LoadRobot:
@@ -25,6 +26,9 @@ class LoadRobot:
         self.home_ee_ori = None
         self.collision_objects = collision_objects
         self.ee_link_name = ee_link_name
+
+        # For tracking disabled collision pairs
+        self._disabled_pairs = set()
 
         # will hold groups of revolute indices, *and* the following fixed joint idx
         self.spherical_groups = {}       # key = first revolute idx, value = fixed_joint_idx
@@ -55,7 +59,8 @@ class LoadRobot:
 
         # Detect spherical groups *and* record the fixed joint after them
         self._disable_spherical_joint_collisions()
-
+        self.disable_sequential_link_collisions(prefix='link')
+        
         # Extract joint limits from urdf
         self.joint_limits = [self.con.getJointInfo(self.robotId, i)[8:10] for i in self.controllable_joint_idx]
         self.lower_limits = [t[0] for t in self.joint_limits]
@@ -73,35 +78,109 @@ class LoadRobot:
         # Get the starting end-effector pos
         self.home_ee_pos, self.home_ee_ori = self.get_link_state(self.end_effector_index)
 
+    def disable_collision_pair(self, link_a, link_b):
+        """
+        Disable collision between two links by their indices and record the pair.
+        """
+        pair = tuple(sorted((link_a, link_b)))
+        self.con.setCollisionFilterPair(
+            self.robotId, self.robotId,
+            linkIndexA=pair[0],
+            linkIndexB=pair[1],
+            enableCollision=0
+        )
+        self._disabled_pairs.add(pair)
+
+    def get_link_name_map(self, body_id):
+        """Builds a map from linkIndex → linkName (and index −1 → base link)."""
+        name_map = {}
+        base_name = self.con.getBodyInfo(body_id)[0].decode('utf-8')
+        name_map[-1] = base_name
+        for ji in range(self.con.getNumJoints(body_id)):
+            info = self.con.getJointInfo(body_id, ji)
+            link_name = info[12].decode('utf-8')
+            name_map[ji] = link_name
+        return name_map
+
+    def detect_all_self_collisions(self, body_id=None):
+        """
+        Loops through every (linkA, linkB) pair in the robot and reports overlaps,
+        skipping any pairs that have been disabled.
+        """
+        if body_id is None:
+            body_id = self.robotId
+
+        name_map = self.get_link_name_map(body_id)
+        num_j = self.con.getNumJoints(body_id)
+        found = False
+
+        # Step the sim to update collisions
+        self.con.stepSimulation()
+
+        for ia in range(-1, num_j):
+            for ib in range(ia + 1, num_j):
+                pair = (ia, ib)
+                if pair in self._disabled_pairs:
+                    continue
+
+                pts = self.con.getClosestPoints(
+                    bodyA=body_id,
+                    bodyB=body_id,
+                    distance=0.0,
+                    linkIndexA=ia,
+                    linkIndexB=ib
+                )
+                if pts:
+                    # print(f"❌ Penetration between '{name_map[ia]}' and '{name_map[ib]}'")
+                    found = True
+
+        if not found:
+            # print("✅ No self-collisions detected among any enabled link pairs.")
+            pass
+
+    def print_robot_environment_contacts(self, obstacle_ids):
+        """
+        For each obstacle in obstacle_ids, print any contact
+        points between the robot (any link) and that obstacle.
+        """
+        name_map = self.get_link_name_map(self.robotId)
+        for obs_id in obstacle_ids:
+            contacts = self.con.getContactPoints(bodyA=self.robotId, bodyB=obs_id)
+            if not contacts:
+                continue
+            # print(f"\n🤝 Contacts with obstacle body {obs_id}:")
+            seen = set()
+            for c in contacts:
+                link_idx = c[3]  # linkIndexA
+                if link_idx in seen:
+                    continue
+                seen.add(link_idx)
+                link_name = name_map.get(link_idx, f"link{link_idx}")
+                # print(f"  • '{link_name}' (link {link_idx}) touches obstacle {obs_id}")
+
     def _disable_spherical_joint_collisions(self):
         """
-        Detect revolute triplets named _x_N, _y_N, _z_N,
-        find the fixed joint immediately after them,
-        disable collision between the before/after links,
-        and record both the triple and that fixed-joint idx.
+        Detect revolute triplets named _x_N, _y_N, _z_N, find the fixed joint immediately after them,
+        and disable collisions between the parent of _x_N and that fixed link.
         """
         p = self.con
         base_name = p.getBodyInfo(self.robotId)[0].decode()
 
-        # 1) Gather all joint & link info in flat dicts
-        joint_info = {}      # name -> {idx, type, parent_link, child_link}
+        # 1) Gather joint & link info
+        joint_info = {}
         link_name_to_idx = {base_name: -1}
 
         for j in range(self.num_joints):
             info = p.getJointInfo(self.robotId, j)
             name = info[1].decode()
             jtype = info[2]
-            parent_idx = info[16]  # link-index of parent
+            parent_idx = info[16]
             child_name = info[12].decode()
-
-            # record link-index for child links
             link_name_to_idx[child_name] = j
-
             parent_name = next(
                 (n for n, idx in link_name_to_idx.items() if idx == parent_idx),
                 base_name
             )
-
             joint_info[name] = {
                 'idx': j,
                 'type': jtype,
@@ -109,7 +188,7 @@ class LoadRobot:
                 'child_link': child_name,
             }
 
-        # 2) Collect revolute triplets (_x_N, _y_N, _z_N)
+        # 2) Collect revolute triplets
         suffix_map = defaultdict(lambda: {'x':None, 'y':None, 'z':None})
         pat = re.compile(r'^(.*)_(x|y|z)_(\d+)$')
 
@@ -120,45 +199,66 @@ class LoadRobot:
                     axis, num = m.group(2), int(m.group(3))
                     suffix_map[num][axis] = name
 
-        # Reset storage
+        # 3) Disable collisions for each triplet
         self.spherical_joint_idx = []
         self.spherical_groups = {}
 
-        # 3) For each complete triplet, find the fixed joint and disable collision
         for N, axes in suffix_map.items():
             if not all(axes.values()):
                 continue
 
-            # joint indices for x,y,z
             ix = joint_info[axes['x']]['idx']
             iy = joint_info[axes['y']]['idx']
             iz = joint_info[axes['z']]['idx']
             self.spherical_joint_idx.append([ix, iy, iz])
 
-            # find the fixed joint whose parent_link == child_link of z-axis revolute
             after_z = joint_info[axes['z']]['child_link']
             fixed_idx = next(
-                (dat['idx']
-                for nm, dat in joint_info.items()
-                if dat['type'] == p.JOINT_FIXED and dat['parent_link'] == after_z),
+                (dat['idx'] for nm, dat in joint_info.items()
+                 if dat['type'] == p.JOINT_FIXED and dat['parent_link'] == after_z),
                 None
             )
             if fixed_idx is None:
                 raise RuntimeError(f"Could not find fixed joint after '{after_z}' (sph #{N})")
 
             self.spherical_groups[ix] = fixed_idx
-
-            # disable collision between before_x parent link and the fixed-link
+            
             before_x = joint_info[axes['x']]['parent_link']
             i0 = link_name_to_idx.get(before_x, -1)
             if i0 >= 0:
-                p.setCollisionFilterPair(
-                    self.robotId, self.robotId,
-                    linkIndexA=i0, linkIndexB=fixed_idx,
-                    enableCollision=0
-                )
+                self.disable_collision_pair(i0, fixed_idx)
             else:
                 print(f"[warn] couldn't disable collision {before_x}↔{fixed_idx}")
+
+    def disable_sequential_link_collisions(self, prefix='link'):
+        """
+        Disable collisions between link0↔link1, link1↔link2, etc.,
+        based on the numeric suffix of your link names.
+        """
+        p = self.con
+
+        # Build name→idx map
+        base_name = p.getBodyInfo(self.robotId)[0].decode()
+        link_name_to_idx = {base_name: -1}
+        for j in range(self.num_joints):
+            child_name = p.getJointInfo(self.robotId, j)[12].decode()
+            link_name_to_idx[child_name] = j
+
+        # Filter names with prefix+number
+        pat = re.compile(rf'^{re.escape(prefix)}(\d+)$')
+        numbered = []
+        for name, idx in link_name_to_idx.items():
+            m = pat.match(name)
+            if m:
+                numbered.append((int(m.group(1)), name))
+
+        numbered.sort(key=lambda x: x[0])
+
+        for (_, nameA), (_, nameB) in zip(numbered, numbered[1:]):
+            idxA = link_name_to_idx[nameA]
+            idxB = link_name_to_idx[nameB]
+            self.disable_collision_pair(idxA, idxB)
+            # print(f"Disabled collision: {nameA} (idx {idxA}) ↔ {nameB} (idx {idxB})")
 
     def get_end_effector_index(self, target_names=None):
         """
@@ -192,10 +292,11 @@ class LoadRobot:
         self.con.performCollisionDetection()  # Ensures up-to-date contact info
         self.con.stepSimulation()
 
-    def set_joint_path(self, joint_path):
+    def set_joint_path(self, joint_path, delay=0.01):
         # Vizualize the interpolated positions
         for config in joint_path:
             self.set_joint_configuration(config)
+            time.sleep(delay)  # Add a small delay for visualization purposes
 
     def get_joint_positions(self):
         return [self.con.getJointState(self.robotId, i)[0] for i in self.controllable_joint_idx]
@@ -229,7 +330,18 @@ class LoadRobot:
 
         return False
     
-    def inverse_kinematics(self, pose, pos_tol=1e-4, rest_config=None, max_iter=100, resample=False, num_resample=5):
+    def collision_check(self, id_a, collision_objects=[]):
+        if not collision_objects:
+            collision_objects = self.collision_objects
+
+        for obj in collision_objects:
+            # Check for collision between the robot and the object
+            collision = self.con.getContactPoints(bodyA=id_a, bodyB=obj)
+            if len(collision) > 0:
+                return True
+        return False
+    
+    def inverse_kinematics(self, pose, pos_tol=1e-4, rest_config=None, max_iter=100, resample=1, num_resample=5):
         # Set the rest configuration to home if not provided
         rest_config = rest_config or self.home_config
 
@@ -245,11 +357,7 @@ class LoadRobot:
             "residualThreshold": pos_tol,
             "maxNumIterations": max_iter
         }
-
-        if not resample:
-            num_resample = 1
     
-        collision_free = False
         for _ in range(num_resample):
             if orientation is not None:
                 joint_positions = self.con.calculateInverseKinematics(self.robotId, self.end_effector_index, position, orientation, **kwargs)
@@ -262,17 +370,13 @@ class LoadRobot:
             # Check for self-collision
             self.reset_joint_positions(joint_positions)
             if not self.check_self_collision(joint_positions):
-                collision_free = True
                 return joint_positions
 
             # Adjust rest configuration slightly to explore new solutions
             # Modify the rest configuration slightly instead of random sampling
             rest_config = np.clip(np.array(rest_config) + np.random.uniform(-0.05, 0.05, len(rest_config)),
                                 self.lower_limits, self.upper_limits).tolist()
-
-            if not collision_free:
-                # print("Warning: Unable to find a collision-free IK solution.")
-                return [0] * len(self.controllable_joint_idx)
+        return joint_positions
     
     def inverse_dynamics(self, joint_positions, joint_velocities=None, joint_accelerations=None):
         joint_velocities = joint_velocities or [0.0] * len(joint_positions)

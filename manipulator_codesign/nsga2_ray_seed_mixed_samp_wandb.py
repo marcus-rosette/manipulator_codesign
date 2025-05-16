@@ -135,15 +135,28 @@ def evaluate_individual(x, targets, min_j, max_j, alpha, beta, delta, gamma):
     c = p.connect(p.DIRECT)
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     p.setGravity(0, 0, -9.81)
-    _ = LoadObjects(p)
+
+    object_loader = LoadObjects(p)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    urdf_dir = os.path.join(script_dir, 'urdf', 'trees')
+    flags = 0 #self.pyb.con.URDF_MERGE_FIXED_LINKS
+    tree_id = object_loader.load_urdf(os.path.join(urdf_dir, "v_trellis_template_inertial.urdf"),
+                                    start_pos=[0, 1, 0], 
+                                    start_orientation=[0, 0, 0], 
+                                    fix_base=True,
+                                    flags=flags)
+    object_loader.collision_objects.append(tree_id)
+
     n, types, axes, lengths = decode_decision_vector(x, min_j, max_j)
-    ch = KinematicChainPyBullet(p, n, types, axes, lengths)
+    ch = KinematicChainPyBullet(p, n, types, axes, lengths, collision_objects=object_loader.collision_objects)
+
     if not ch.is_built:
         ch.build_robot()
     ch.load_robot()
     ch.compute_chain_metrics(targets)
     metrics = {
         'pose_error': ch.mean_pose_error,
+        'rrt_path_cost': ch.mean_rrt_path_cost,
         'torque': ch.mean_torque,
         'joint_count': ch.num_joints,
         'conditioning_index': ch.global_conditioning_index,
@@ -157,7 +170,7 @@ def evaluate_individual(x, targets, min_j, max_j, alpha, beta, delta, gamma):
 
 # -------- Problem Definition --------
 class KinematicChainProblem(Problem):
-    def __init__(self, targets, min_joints=2, max_joints=7,
+    def __init__(self, targets, seeds, min_joints=2, max_joints=7,
                  alpha=1, beta=1, delta=1, gamma=1, cal_samples=15):
         print("[KinematicChainProblem] Initializing and calibrating...")
         self.targets = np.array(targets)
@@ -171,9 +184,35 @@ class KinematicChainProblem(Problem):
                          xl=np.array(xl), xu=np.array(xu))
 
         # calibration
-        self._x_cal = np.random.uniform(self.xl, self.xu,
-                                        (cal_samples, len(xl)))
+        # self._x_cal = np.random.uniform(self.xl, self.xu,
+        #                                 (cal_samples, len(xl)))
+        # self._parallel_calibration()
+        # build calibration batch mixing seeds + random
+        self._x_cal = self._make_calibration_batch(seeds, cal_samples)
+
+        # now run calibration
         self._parallel_calibration()
+
+    def _make_calibration_batch(self, seeds, cal_samples):
+        """
+        Take up to cal_samples from provided seeds, 
+        then fill the rest with uniform random draws.
+        """
+        seeds = [np.asarray(s, float) for s in seeds]
+        n_var = len(self.xl)
+        # sanity check
+        for s in seeds:
+            assert s.shape == (n_var,), "seed vector has wrong length"
+
+        n_seed = min(len(seeds), cal_samples)
+        X_seeded = np.stack(seeds[:n_seed], axis=0)
+
+        if cal_samples > n_seed:
+            n_rand = cal_samples - n_seed
+            X_rand = np.random.uniform(self.xl, self.xu, (n_rand, n_var))
+            return np.vstack([X_seeded, X_rand])
+        else:
+            return X_seeded
 
     def _parallel_calibration(self):
         print("[Calibration] Running parallel calibration samples...")
@@ -188,6 +227,7 @@ class KinematicChainProblem(Problem):
             lo, hi = min(arr), max(arr)
             return (lo, hi if hi > lo else lo + 1e-6)
         self.pose_bounds    = bounds([r['pose_error'] for r in res])
+        self.rrt_bounds     = bounds([r['rrt_path_cost'] for r in res])
         self.torque_bounds  = bounds([r['torque'] for r in res])
         self.delta_bounds   = bounds([r['delta_joint_score_rrmc'] for r in res])
         self.pos_bounds     = bounds([r['pos_error_rrmc'] for r in res])
@@ -206,6 +246,7 @@ class KinematicChainProblem(Problem):
             return np.clip((v - lo) / max(1e-8, hi - lo), 0, 1)
         for i, r in enumerate(res):
             p_lo, p_hi = self.pose_bounds
+            rr_lo, rr_hi = self.rrt_bounds
             t_lo, t_hi = self.torque_bounds
             d_lo, d_hi = self.delta_bounds
             pr_lo, pr_hi = self.pos_bounds
@@ -214,8 +255,16 @@ class KinematicChainProblem(Problem):
             F[i, 1] = self.beta  * lin(r['torque'], t_lo, t_hi)
             F[i, 2] = self.delta * lin(r['joint_count'], jc_lo, jc_hi)
             F[i, 3] = self.gamma * abs(r['conditioning_index'] - 1)
-            F[i, 4] = lin(r['delta_joint_score_rrmc'], d_lo, d_hi)
-            F[i, 5] = lin(r['pos_error_rrmc'], pr_lo, pr_hi)
+
+            # F[i, 4] = lin(r['delta_joint_score_rrmc'], d_lo, d_hi)
+            # F[i, 5] = lin(r['pos_error_rrmc'], pr_lo, pr_hi)
+            w_delta_rrmc, w_pos_rrmc = 0.5, 0.5   # or tune to your preferences
+
+            # in _evaluate, replace the two objectives at indices 4,5 with one:
+            F[i, 4] = (w_delta_rrmc * lin(r['delta_joint_score_rrmc'], d_lo, d_hi)
+                       + w_pos_rrmc   * lin(r['pos_error_rrmc'],      pr_lo, pr_hi))
+
+            F[i, 5] = lin(r['rrt_path_cost'], rr_lo, rr_hi)
         out["F"] = F
 
 
@@ -231,13 +280,13 @@ class WandbLogger(Callback):
         
         # objective names
         obj_names = ['pose_error', 'torque', 'joint_count',
-                     'conditioning_index', 'delta_joint_score_rrmc',
-                     'pos_error_rrmc']
+                     'conditioning_index', 'rrmc_score',
+                     'rrt_path_cost']
 
         # log per-generation aggregates
         log_dict = {"generation": self.gen}
-        log_dict.update({obj_names[i]: mean_obj[i] for i in range(F.shape[1])})
-        log_dict.update({obj_names[i]: best_obj[i] for i in range(F.shape[1])})
+        log_dict.update({f'{obj_names[i]}_mean': mean_obj[i] for i in range(F.shape[1])})
+        # log_dict.update({obj_names[i]: best_obj[i] for i in range(F.shape[1])})
         wandb.log(log_dict, step=self.gen)
 
         self.gen += 1
@@ -250,8 +299,8 @@ if __name__ == "__main__":
 
     # set up operators
     max_joints = 7
-    num_generations = 1
-    num_population = 5
+    num_generations = 10
+    num_population = 15
     num_target_pts = 5
     var_types = ['int'] + ['int','int','real'] * max_joints
 
@@ -270,7 +319,7 @@ if __name__ == "__main__":
                               prob_int=0.1)
 
     targets = np.random.uniform([-2,0,0],[2,2,2],(num_target_pts,3)).tolist()
-    problem = KinematicChainProblem(targets)
+    problem = KinematicChainProblem(targets, seeds=seeds, cal_samples=15)
 
     api_key = os.environ.get("WANDB_API_KEY")
     if api_key is None:
@@ -312,7 +361,7 @@ if __name__ == "__main__":
                    callback=callback)
 
     # save results locally
-    os.makedirs('data', exist_ok=True)
+    os.makedirs('data/nsga2_results', exist_ok=True)
     fn = os.path.join('data', f"results_{datetime.now():%Y%m%d_%H%M%S}.pkl")
     with open(fn, 'wb') as f:
         pickle.dump({'X': res.X, 'F': res.F}, f)

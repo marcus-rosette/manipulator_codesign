@@ -138,7 +138,7 @@ def encode_seed(dec_vec, min_joints=4, max_joints=7):
 
 
 if __name__ == "__main__":
-    urdf_path = "manipulator_codesign/urdf/robots/test_robot_16.urdf"
+    urdf_path = "manipulator_codesign/urdf/robots/test_robot_6.urdf"
     total_joint_count, joint_types, joint_axes, link_lengths = urdf_to_decision_vector(
         urdf_path
     )

@@ -2,9 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Slerp
 from scipy.spatial.transform import Rotation as R
-# import pybullet_planning as pp
-# from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
-# from pybullet_planning import cartesian_motion_planning
+import pybullet_planning as pp
+from pybullet_planning import (rrt_connect, get_distance_fn, get_sample_fn, get_extend_fn, get_collision_fn)
+from pybullet_planning import cartesian_motion_planning
 
 
 class KinematicChainMotionPlanner:
@@ -559,25 +559,42 @@ class KinematicChainMotionPlanner:
             
             return final_conf
         return sample
+    
+    def make_strict_collision_fn(self, obstacles):
+        def fn(q):
+            # 1) move into q
+            self.robot.set_joint_configuration(q)
+            # 2) collision check
+            #  a) self-collision?
+            if self.robot.check_self_collision(q):
+                self.robot.detect_all_self_collisions(self.robot.robotId)
+                return True
+            #  b) environment collision?
+            if self.robot.collision_check(self.robot.robotId, obstacles):
+                self.robot.detect_all_self_collisions(self.robot.robotId)
+                return True
+            return False
+        return fn
 
-    def rrt_path(self, start_joint_config, end_joint_config, target_pos=None, steps=0, rrt_iter=500):
+    def rrt_path(self, start_joint_config, end_joint_config, collision_objects=None, steps=None, rrt_iter=500):
         extend_fn = get_extend_fn(self.robot.robotId, self.robot.controllable_joint_idx)
-        collision_fn = get_collision_fn(self.robot.robotId, self.robot.controllable_joint_idx, self.robot.collision_objects)
+        # collision_fn = get_collision_fn(self.robot.robotId, self.robot.controllable_joint_idx, collision_objects)
+        collision_fn = self.make_strict_collision_fn(collision_objects)
         distance_fn = get_distance_fn(self.robot.robotId, self.robot.controllable_joint_idx)
         sample_fn = get_sample_fn(self.robot.robotId, self.robot.controllable_joint_idx)
         # sample_fn = self.vector_field_sample_fn(target_pos)
 
         # Step 1: Early Exit - If Start is Already Close to Any Goal - Compute Euclidean distance (L2 norm)
         if np.linalg.norm(np.array(start_joint_config) - np.array(end_joint_config)) < 0.1:
-            print("Start configuration is already close to the goal. No need for RRT.")
+            # print("Start configuration is already close to the goal. No need for RRT.")
             return [start_joint_config, end_joint_config]
 
         # Step 2: Early Collision Check
         if collision_fn(start_joint_config):
-            print("Start configuration is in collision. Skipping RRT.")
+            # print("Start configuration is in collision. Skipping RRT.")
             return None 
         elif collision_fn(end_joint_config):
-            print("End configuration is in collision. Skipping RRT.")
+            # print("End configuration is in collision. Skipping RRT.")
             return None
 
         path = rrt_connect(
@@ -590,7 +607,7 @@ class KinematicChainMotionPlanner:
         )
         
         # Ensure the path has exactly `steps` joint configurations
-        if path != None and steps > 0: 
+        if path and steps: 
             path = self.sample_path_to_length(path, steps)
         
         return path

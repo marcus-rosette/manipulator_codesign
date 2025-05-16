@@ -529,9 +529,9 @@ if __name__ == '__main__':
     robot_name = 'test_robot'
     urdf_gen = URDFGen(robot_name)
 
-    axes = [0, 1, 2, 0]
-    joint_types = [1, 1, 2, 1]
-    link_lens = [0.75, 0.7, 0.7, 0.1]
+    axes = [0, 1, 2]
+    joint_types = [1, 1, 1]
+    link_lens = [0.75, 0.7, 0.7]
 
     joint_limit_prismatic = (-0.5, 0.5)
     joint_limit_revolute = (-3.14, 3.14)
