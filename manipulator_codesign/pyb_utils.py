@@ -1,5 +1,6 @@
 import atexit
 import os
+import sys
 import ctypes
 import pybullet as p
 import pybullet_data
@@ -28,7 +29,15 @@ class PybUtils:
             self.con.configureDebugVisualizer(self.con.COV_ENABLE_GUI, 0)
         else:
             # Suppress stdout and stderr at the OS level
-            libc = ctypes.CDLL(None)
+            # libc = ctypes.CDLL(None)
+            if sys.platform.startswith('linux'):
+                libc = ctypes.CDLL("libc.so.6")
+            elif sys.platform == "darwin":
+                libc = ctypes.CDLL("libc.dylib")
+            elif sys.platform == "win32":
+                libc = ctypes.CDLL("msvcrt.dll")  # Microsoft C runtime
+            else:
+                raise RuntimeError("Unsupported OS")
             original_stdout = os.dup(1)  # Duplicate stdout file descriptor
             original_stderr = os.dup(2)  # Duplicate stderr file descriptor
 

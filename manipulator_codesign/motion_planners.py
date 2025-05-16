@@ -27,6 +27,28 @@ class KinematicChainMotionPlanner:
             w1 = self.robot.safe_manipulability(q_delta)
             grad[i] = (w1 - w0) / delta
         return grad
+    
+    def joint_limit_avoidance_gradient(self, joint_positions, margin=0.5):
+        """
+        Compute a repulsive gradient pushing joints away from their limits.
+        The closer to a limit, the stronger the gradient.
+        """
+        grad = np.zeros_like(joint_positions)
+        for i, q in enumerate(joint_positions):
+            q_min = self.robot.lower_limits[i]
+            q_max = self.robot.upper_limits[i]
+            q_range = q_max - q_min
+            q_center = (q_max + q_min) / 2.0
+            buffer = margin * q_range
+
+            # Repulsive gradient (e.g., quadratic or inverse barrier function)
+            if q < q_min + buffer:
+                grad[i] = (q_min + buffer - q) / (buffer**2)
+            elif q > q_max - buffer:
+                grad[i] = (q_max - buffer - q) / (buffer**2)
+            else:
+                grad[i] = 0
+        return grad
 
     def shortest_angular_distance(self, start_configuration, end_configuration):
         """
@@ -110,9 +132,9 @@ class KinematicChainMotionPlanner:
 
         return interpolated_configs, collision_in_path
     
-    def resolved_rate_control(self, target_pose, alpha=0.01, max_steps=10000, tol=0.05,
-                            manipulability_gain=0.01, damping_lambda=0.1, beta=0.9, max_joint_vel=1.0,
-                            stall_patience=40, stall_vel_threshold=0.04, plot_manipulability=False):
+    def resolved_rate_control(self, target_pose, alpha=0.75, max_steps=10000, tol=0.05,
+                            manipulability_gain=0.1, damping_lambda=0.15, beta=0.9, max_joint_vel=1.0,
+                            stall_patience=10, stall_vel_threshold=0.1, plot_manipulability=False):
         """
         Resolved-rate motion control with manipulability maximization and smoothing.
         Args:
@@ -161,6 +183,7 @@ class KinematicChainMotionPlanner:
 
             dq_main = J_pinv @ vel_ee # Initial joint velocity command update
 
+            #TODO: Do I need to do joint limit avoidance here?
             # ✅ Nullspace biasing
             N = np.eye(len(q)) - J_pinv @ J
             grad_w = self.manipulability_gradient(q)
@@ -168,6 +191,16 @@ class KinematicChainMotionPlanner:
 
             # ✅ Sum the bias terms with the primary command
             dq = dq_main + dq_manip_bias
+            # ✅ Nullspace biasing
+            # N = np.eye(len(q)) - J_pinv @ J
+            # grad_w = self.manipulability_gradient(q)
+            # grad_joint_limits = self.joint_limit_avoidance_gradient(q)
+
+            # dq_manip_bias = manipulability_gain * N @ grad_w
+            # dq_limit_bias = manipulability_gain * N @ grad_joint_limits 
+
+            # # ✅ Sum the bias terms with the primary command
+            # dq = dq_main + dq_manip_bias + dq_limit_bias
 
             # ✅ Clip joint velocities
             dq = np.clip(dq, -max_joint_vel, max_joint_vel)
@@ -526,25 +559,42 @@ class KinematicChainMotionPlanner:
             
             return final_conf
         return sample
+    
+    def make_strict_collision_fn(self, obstacles):
+        def fn(q):
+            # 1) move into q
+            self.robot.set_joint_configuration(q)
+            # 2) collision check
+            #  a) self-collision?
+            if self.robot.check_self_collision(q):
+                self.robot.detect_all_self_collisions(self.robot.robotId)
+                return True
+            #  b) environment collision?
+            if self.robot.collision_check(self.robot.robotId, obstacles):
+                self.robot.detect_all_self_collisions(self.robot.robotId)
+                return True
+            return False
+        return fn
 
-    def rrt_path(self, start_joint_config, end_joint_config, target_pos=None, steps=0, rrt_iter=500):
+    def rrt_path(self, start_joint_config, end_joint_config, collision_objects=None, steps=None, rrt_iter=500):
         extend_fn = get_extend_fn(self.robot.robotId, self.robot.controllable_joint_idx)
-        collision_fn = get_collision_fn(self.robot.robotId, self.robot.controllable_joint_idx, self.robot.collision_objects)
+        # collision_fn = get_collision_fn(self.robot.robotId, self.robot.controllable_joint_idx, collision_objects)
+        collision_fn = self.make_strict_collision_fn(collision_objects)
         distance_fn = get_distance_fn(self.robot.robotId, self.robot.controllable_joint_idx)
         sample_fn = get_sample_fn(self.robot.robotId, self.robot.controllable_joint_idx)
         # sample_fn = self.vector_field_sample_fn(target_pos)
 
         # Step 1: Early Exit - If Start is Already Close to Any Goal - Compute Euclidean distance (L2 norm)
         if np.linalg.norm(np.array(start_joint_config) - np.array(end_joint_config)) < 0.1:
-            print("Start configuration is already close to the goal. No need for RRT.")
+            # print("Start configuration is already close to the goal. No need for RRT.")
             return [start_joint_config, end_joint_config]
 
         # Step 2: Early Collision Check
         if collision_fn(start_joint_config):
-            print("Start configuration is in collision. Skipping RRT.")
+            # print("Start configuration is in collision. Skipping RRT.")
             return None 
         elif collision_fn(end_joint_config):
-            print("End configuration is in collision. Skipping RRT.")
+            # print("End configuration is in collision. Skipping RRT.")
             return None
 
         path = rrt_connect(
@@ -557,7 +607,7 @@ class KinematicChainMotionPlanner:
         )
         
         # Ensure the path has exactly `steps` joint configurations
-        if path != None and steps > 0: 
+        if path and steps: 
             path = self.sample_path_to_length(path, steps)
         
         return path

@@ -45,6 +45,16 @@ class ViewRobot:
         self.pyb = PybUtils(renders=renders)
         self.object_loader = LoadObjects(self.pyb.con)
 
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        urdf_dir = os.path.join(script_dir, 'urdf', 'trees')
+        flags = 0 #self.pyb.con.URDF_MERGE_FIXED_LINKS
+        self.tree_id = self.object_loader.load_urdf(os.path.join(urdf_dir, "v_trellis_template_inertial.urdf"),
+                                        start_pos=[0, 1, 0], 
+                                        start_orientation=[0, 0, 0], 
+                                        fix_base=True,
+                                        flags=flags)
+        self.object_loader.collision_objects.append(self.tree_id)
+
         self.robot = LoadRobot(self.pyb.con, 
                                robot_urdf_path, 
                                [0, 0, 0], 
@@ -90,15 +100,22 @@ class ViewRobot:
         self.robot.set_joint_path(joint_path)
 
     def test_resolved_rate_motion_control(self):
+        # input("Press Enter to start the resolved rate motion control test...")
         target_pos = [0, 1.5, 1.5]
         motion_planner = KinematicChainMotionPlanner(self.robot)
 
         target_orientations = [
             np.array([180, 0, 90]), # top-down (-z)
-            np.array([0, 0, -90]), # bottom-up (+z)
-            np.array([90, 0, -90]), # right-left (-x)
-            np.array([90, 0, 90]), # left-right (+x)
+
             np.array([90, 0, 180]), # front-back (+y)
+
+            np.array([0, 0, -90]), # bottom-up (+z)
+
+            np.array([90, 0, -90]), # right-left (-x)
+
+            np.array([90, 0, 180]), # front-back (+y)
+
+            np.array([90, 0, 90]), # left-right (+x)
         ]
 
         for target_ori in target_orientations:
@@ -108,8 +125,10 @@ class ViewRobot:
                                                                         (target_pos, target_ori), 
                                                                         max_steps=400,
                                                                         plot_manipulability=False, 
-                                                                        alpha=0.75, 
-                                                                        manipulability_gain=0.5, 
+                                                                        alpha=0.75,
+                                                                        beta=0.75,
+                                                                        damping_lambda=0.15, 
+                                                                        manipulability_gain=0.1, 
                                                                         stall_vel_threshold=0.1, 
                                                                         stall_patience=10)
             print("\nManipulability score:", manip_score)
@@ -122,6 +141,61 @@ class ViewRobot:
             #     self.robot.set_joint_configuration(q_final)
         
         print("Test complete. Press Ctrl+C to exit.")
+        while True:
+            self.pyb.con.stepSimulation()
+
+    def rrt_path_test(self):
+        # Start configuration is the robots home position
+        start_config = self.robot.home_config
+
+        # Get IK to the target position
+        target_pos = [0.25, 0.5, 1.75]
+        target_ori = np.array([90, 0, 180])
+        target_ori = R.from_euler('xyz', target_ori, degrees=True).as_quat()
+        target_pose = (target_pos, target_ori)
+        target_config = self.robot.inverse_kinematics(target_pose, pos_tol=self.ik_tol, max_iter=1000, resample=True, num_resample=10)
+
+        # Initialize the motion planner
+        motion_planner = KinematicChainMotionPlanner(self.robot)
+
+        # Pass the start and target configurations to the RRT planner
+        joint_path = motion_planner.rrt_path(start_config, target_config, rrt_iter=1000, collision_objects=self.object_loader.collision_objects, steps=500)
+
+        # Check if the path is valid
+        if joint_path is None:
+            print("\nRRT path planning failed.\n")
+            return
+        else:
+            print("\nRRT path planning succeeded.\n")
+
+        print(len(joint_path), "steps in the path")
+
+        # Execute the planned joint path
+        self.robot.set_joint_path(joint_path)
+
+        print("Test complete. Press Ctrl+C to exit.")
+        while True:
+            self.pyb.con.stepSimulation()
+
+    def test_collisions(self):
+        # Define joint configuration for the robot
+        # joint_config = [0, 0, 0, 0, 0, 0]
+        # joint_config = self.robot.home_config
+        joint_config = [0.15779848106510422, -1.8, -0.1135211775527961, -1.824819842920306, -1.5824819842920306]
+
+        self.robot.set_joint_configuration(joint_config)
+        self.robot.reset_joint_positions(joint_config)
+
+        self.robot.detect_all_self_collisions(self.robot.robotId)
+        self.robot.print_robot_environment_contacts(self.object_loader.collision_objects)
+
+        # Check for collisions
+        print('Self-collision check:')
+        print('AABB: ', self.robot.check_collision_aabb(self.robot.robotId, self.robot.robotId))
+        print('General: ', self.robot.collision_check(self.robot.robotId, collision_objects=self.object_loader.collision_objects))
+        print('Self: ', self.robot.check_self_collision(self.robot.home_config))
+
+        print("\nTest complete. Press Ctrl+C to exit.\n")
         while True:
             self.pyb.con.stepSimulation()
 
@@ -197,5 +271,7 @@ if __name__ == "__main__":
                            ik_tol=0.1,
                            ee_link_name=ee_link_name)
     
-    view_robot.test_resolved_rate_motion_control()
-    # view_robot.main()
+    # view_robot.test_resolved_rate_motion_control()
+    view_robot.main()
+    # view_robot.rrt_path_test()
+    # view_robot.test_collisions()

@@ -12,7 +12,7 @@ from pymoo.operators.mutation.pm import PolynomialMutation
 from pymoo.optimize import minimize
 
 from manipulator_codesign.moo_decoder import decode_decision_vector
-from manipulator_codesign.kinematic_chain import KinematicChainRTB, KinematicChainPyBullet
+from manipulator_codesign.kinematic_chain import KinematicChainPyBullet
 
 
 class KinematicChainProblem(Problem):
@@ -324,7 +324,7 @@ if __name__ == '__main__':
     }
 
     # Define base storage directory and base filename
-    storage_dir = '/home/marcus/IMML/manipulator_codesign/data/nsga2_results/'
+    storage_dir = 'C:/Users/marcu/OneDrive/Documents/GitHub/manipulator_codesign/data/nsga2_results/'
     base_filename = "nsga2_results"
 
     # Create timestamp string
