@@ -178,15 +178,11 @@ class KinematicChainProblem(Problem):
         self.alpha, self.beta, self.delta, self.gamma = alpha, beta, delta, gamma
         n_obj = 6
 
-        xl = [min_joints] + [0, 0, 0.1] * max_joints
+        xl = [min_joints] + [0, 0, 0.05] * max_joints
         xu = [max_joints] + [2, 2, 0.75] * max_joints
         super().__init__(n_var=len(xl), n_obj=n_obj,
                          xl=np.array(xl), xu=np.array(xu))
 
-        # calibration
-        # self._x_cal = np.random.uniform(self.xl, self.xu,
-        #                                 (cal_samples, len(xl)))
-        # self._parallel_calibration()
         # build calibration batch mixing seeds + random
         self._x_cal = self._make_calibration_batch(seeds, cal_samples)
 

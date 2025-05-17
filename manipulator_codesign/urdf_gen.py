@@ -265,14 +265,78 @@ class URDFGen:
             )
         )
         
-    def add_custom_gripper(self, parent, last_link_length):
-        # TODO: Need to update functionality for changing shape_dim to just the link lengths
-        self.robot.append(self.create_joint('wrist_joint', parent, 'wrist', [0, 0, last_link_length + 0.025, 0, 0, 0], 'fixed'))
-        self.robot.append(self.create_link('wrist', 'box', [0.05, 0.25, 0.05], material='purple', color=[0.5, 0, 0.5, 1]))
-        self.robot.append(self.create_joint('left_finger_joint', 'wrist', 'left_finger', [0, -0.1, 0.075, 0, 0, 0], 'fixed'))
-        self.robot.append(self.create_link('left_finger', 'box', [0.05, 0.05, 0.15], material='purple', color=[0.5, 0, 0.5, 1]))
-        self.robot.append(self.create_joint('right_finger_joint', 'wrist', 'right_finger', [0, 0.1, 0.075, 0, 0, 0], 'fixed'))
-        self.robot.append(self.create_link('right_finger', 'box', [0.05, 0.05, 0.15], material='purple', color=[0.5, 0, 0.5, 1]))
+    def add_prismatic_joint(self, joint_name, parent_name, child_name, axis, joint_limit, parent_length, child_length, link_width, color_code, color_name, collision, z_buffer=0.01):
+        """
+        Adds a prismatic (linear) joint to the robot model, optionally with a fixed joint and a slider link for non-z axes.
+        Parameters:
+            joint_name (str): Name of the prismatic joint to be created.
+            parent_name (str): Name of the parent link to which the joint is attached.
+            child_name (str): Name of the child link that moves with the joint.
+            axis (str): Axis of motion for the prismatic joint, e.g., '0 0 1', '1 0 0', or '0 1 0'.
+            joint_limit (list or tuple): Limits of the prismatic joint motion [lower, upper].
+            parent_length (float): Length of the parent link (used for joint origin).
+            child_length (float): Length of the child link (used for joint limit if axis is '0 0 1').
+            link_width (float): Width of the link (used for sizing the slider link).
+            color_code (str): Color code for the link material (e.g., hex or RGBA).
+            color_name (str): Name of the color/material for the link.
+            collision (bool): Whether to add collision geometry to the link.
+            z_buffer (float, optional): Buffer distance added to the z-axis for joint limits and origin (helps avoid collisions with previous link). Default is 0.01.
+        Notes:
+            - For prismatic joints along the z-axis ('0 0 1'), the joint limit and origin are set based on child_length and z_buffer.
+            - For prismatic joints along x or y axes, a fixed joint and a slider link are created to represent the linear motion.
+            - The function appends the created joints and links to the robot model.
+        """
+        if axis == '0 0 1':
+            joint_limit = [0, child_length - z_buffer]
+            origin = [0, 0, link_width + z_buffer, 0, 0, 0]
+        
+        else:
+            origin = [0, 0, 0, 0, 0, 0]
+            # 1) Create a fixed joint
+            joint_name_fixed = f'{joint_name}_fixed'
+            child_name_fixed = f'{child_name}_fixed'
+            self.robot.append(
+                self.create_joint(joint_name_fixed, 
+                                parent=parent_name, 
+                                child=child_name_fixed, 
+                                joint_type='fixed', 
+                                axis=axis,
+                                limit=joint_limit, 
+                                origin=[0, 0, parent_length, 0, 0, 0]))
+
+            # 2) Create fixed 'linear slider' link
+            if axis == '1 0 0':
+                box_length = abs(joint_limit[0]) + abs(joint_limit[1]) + (2 * link_width)
+                box_width = 2 * link_width
+                box_height = link_width
+
+            if axis == '0 1 0':
+                box_length = 2 * link_width
+                box_width = abs(joint_limit[0]) + abs(joint_limit[1]) + (2 * link_width)
+                box_height = link_width
+
+            self.robot.append(
+                self.create_link(child_name_fixed, 
+                                type='box', 
+                                link_len=box_length,
+                                link_width=box_width,
+                                link_height=box_height,
+                                origin=[0, 0, -box_height / 2, 0, 0, 0], 
+                                material=color_name, 
+                                color=color_code, 
+                                collision=collision))
+            
+            parent_name = child_name_fixed
+
+        # 3) Create prismatic joint
+        self.robot.append(
+            self.create_joint(joint_name, 
+                            parent=parent_name, 
+                            child=child_name, 
+                            joint_type='prismatic', 
+                            axis=axis,
+                            limit=joint_limit, 
+                            origin=origin))
 
     def add_end_effector_link(self, parent, last_link_length):
         """
@@ -337,11 +401,26 @@ class URDFGen:
             joint_name = f'joint{i}'
             child_name = f'link{i}'
 
+            if joint_type == 'prismatic':
+                z_buffer = 0
+                if axis == '0 0 1':
+                    z_buffer = 0.011
+                    child_length = parent_length - link_width + z_buffer
+                self.add_prismatic_joint(joint_name, parent_name, child_name, axis, joint_limit, parent_length, child_length, link_width, color_code, color_name, collision, z_buffer)
+                
             if joint_type == 'revolute':
                 # Create a small fixed 'cylinder' joint visualization for the revolute joint
                 self.create_joint_visual(parent_name, parent_length, axis, i, color_name, color_code)
+
+                self.robot.append(
+                    self.create_joint(joint_name, 
+                                    parent=parent_name, 
+                                    child=child_name, 
+                                    joint_type=joint_type, 
+                                    axis=axis,
+                                    limit=joint_limit, 
+                                    origin=[0, 0, parent_length, 0, 0, 0]))
             
-            # Create the official joint and link
             if joint_type == 'spherical':
                 sphere_radius = 0.1
                 spherical_joint, sphere_link = self.add_mock_spherical_joint(
@@ -363,17 +442,8 @@ class URDFGen:
                                     parent=parent_name,
                                     child=child_name,
                                     origin=[0,0,0,0,0,0],
-                                    joint_type='fixed')
-                )
-            else:
-                self.robot.append(
-                    self.create_joint(joint_name, 
-                                    parent=parent_name, 
-                                    child=child_name, 
-                                    joint_type=joint_type, 
-                                    axis=axis,
-                                    limit=joint_limit, 
-                                    origin=[0, 0, parent_length, 0, 0, 0]))
+                                    joint_type='fixed'))
+
             self.robot.append(
                 self.create_link(child_name, 
                                 type=link_shape, 
@@ -387,10 +457,7 @@ class URDFGen:
             parent_name = child_name
             parent_length = child_length
         
-        if gripper:
-            self.add_custom_gripper(parent=parent_name, last_link_length=parent_length)
-        else:
-            self.add_end_effector_link(parent=parent_name, last_link_length=parent_length)
+        self.add_end_effector_link(parent=parent_name, last_link_length=parent_length)
     
     @staticmethod
     def _shape_attributes(shape_type, shape_dim):
@@ -529,9 +596,9 @@ if __name__ == '__main__':
     robot_name = 'test_robot'
     urdf_gen = URDFGen(robot_name)
 
-    axes = [0, 1, 2]
-    joint_types = [1, 1, 1]
-    link_lens = [0.75, 0.7, 0.7]
+    joint_types = [2,0,2,0,2]
+    axes = [0,2,0,2,0]
+    link_lens = [0.75, 0.75, 0.5, 0.5, 0.4]
 
     joint_limit_prismatic = (-0.5, 0.5)
     joint_limit_revolute = (-3.14, 3.14)

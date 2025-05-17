@@ -32,8 +32,8 @@
             <geometry>
                 <cylinder length="0.125" radius="0.06"/>
             </geometry>
-            <material name="floralwhite">
-                <color rgba="1.0 0.9803921568627451 0.9411764705882353 1.0"/>
+            <material name="mediumspringgreen">
+                <color rgba="0.0 0.9803921568627451 0.6039215686274509 1.0"/>
             </material>
         </visual>
     </link>
@@ -55,8 +55,8 @@
             <geometry>
                 <cylinder length="0.5" radius="0.05"/>
             </geometry>
-            <material name="floralwhite">
-                <color rgba="1.0 0.9803921568627451 0.9411764705882353 1.0"/>
+            <material name="mediumspringgreen">
+                <color rgba="0.0 0.9803921568627451 0.6039215686274509 1.0"/>
             </material>
         </visual>
         <collision>
@@ -82,8 +82,8 @@
             <geometry>
                 <cylinder length="0.125" radius="0.06"/>
             </geometry>
-            <material name="lemonchiffon">
-                <color rgba="1.0 0.9803921568627451 0.803921568627451 1.0"/>
+            <material name="greenyellow">
+                <color rgba="0.6784313725490196 1.0 0.1843137254901961 1.0"/>
             </material>
         </visual>
     </link>
@@ -105,8 +105,8 @@
             <geometry>
                 <cylinder length="0.3" radius="0.05"/>
             </geometry>
-            <material name="lemonchiffon">
-                <color rgba="1.0 0.9803921568627451 0.803921568627451 1.0"/>
+            <material name="greenyellow">
+                <color rgba="0.6784313725490196 1.0 0.1843137254901961 1.0"/>
             </material>
         </visual>
         <collision>
@@ -132,8 +132,8 @@
             <geometry>
                 <cylinder length="0.125" radius="0.06"/>
             </geometry>
-            <material name="plum">
-                <color rgba="0.8666666666666667 0.6274509803921569 0.8666666666666667 1.0"/>
+            <material name="honeydew">
+                <color rgba="0.9411764705882353 1.0 0.9411764705882353 1.0"/>
             </material>
         </visual>
     </link>
@@ -155,8 +155,8 @@
             <geometry>
                 <cylinder length="0.3" radius="0.05"/>
             </geometry>
-            <material name="plum">
-                <color rgba="0.8666666666666667 0.6274509803921569 0.8666666666666667 1.0"/>
+            <material name="honeydew">
+                <color rgba="0.9411764705882353 1.0 0.9411764705882353 1.0"/>
             </material>
         </visual>
         <collision>
@@ -169,36 +169,36 @@
     <joint name="joint3" type="prismatic">
         <parent link="link2"/>
         <child link="link3"/>
-        <origin xyz="0 0 0.3" rpy="0 0 0"/>
+        <origin xyz="0 0 0.061" rpy="0 0 0"/>
         <axis xyz="0 0 1"/>
-        <limit lower="-0.5" upper="0.5" effort="10" velocity="1"/>
+        <limit lower="0" upper="0.25" effort="10" velocity="1"/>
     </joint>
     <link name="link3">
         <inertial>
             <mass value="1.0"/>
-            <inertia ixx="0.013958333333333336" iyy="0.013958333333333336" izz="0.0012500000000000002" ixy="0.0" ixz="0.0" iyz="0.0"/>
-            <origin xyz="0 0 0.2" rpy="0 0 0"/>
+            <inertia ixx="0.00630175" iyy="0.00630175" izz="0.0012500000000000002" ixy="0.0" ixz="0.0" iyz="0.0"/>
+            <origin xyz="0 0 0.1305" rpy="0 0 0"/>
         </inertial>
         <visual>
-            <origin xyz="0 0 0.2" rpy="0 0 0"/>
+            <origin xyz="0 0 0.1305" rpy="0 0 0"/>
             <geometry>
-                <cylinder length="0.4" radius="0.05"/>
+                <cylinder length="0.261" radius="0.05"/>
             </geometry>
             <material name="darkturquoise">
                 <color rgba="0.0 0.807843137254902 0.8196078431372549 1.0"/>
             </material>
         </visual>
         <collision>
-            <origin xyz="0 0 0.2" rpy="0 0 0"/>
+            <origin xyz="0 0 0.1305" rpy="0 0 0"/>
             <geometry>
-                <cylinder length="0.4" radius="0.05"/>
+                <cylinder length="0.261" radius="0.05"/>
             </geometry>
         </collision>
     </link>
     <joint name="joint_viz4" type="fixed">
         <parent link="link3"/>
         <child link="joint_viz_link4"/>
-        <origin xyz="0 0 0.4" rpy="0 0 0"/>
+        <origin xyz="0 0 0.261" rpy="0 0 0"/>
     </joint>
     <link name="joint_viz_link4">
         <inertial>
@@ -211,15 +211,15 @@
             <geometry>
                 <cylinder length="0.125" radius="0.06"/>
             </geometry>
-            <material name="lightseagreen">
-                <color rgba="0.12549019607843137 0.6980392156862745 0.6666666666666666 1.0"/>
+            <material name="darkgray">
+                <color rgba="0.6627450980392157 0.6627450980392157 0.6627450980392157 1.0"/>
             </material>
         </visual>
     </link>
     <joint name="joint4" type="revolute">
         <parent link="link3"/>
         <child link="link4"/>
-        <origin xyz="0 0 0.4" rpy="0 0 0"/>
+        <origin xyz="0 0 0.261" rpy="0 0 0"/>
         <axis xyz="0 0 1"/>
         <limit lower="-3.14" upper="3.14" effort="10" velocity="1"/>
     </joint>
@@ -234,8 +234,8 @@
             <geometry>
                 <cylinder length="0.4" radius="0.05"/>
             </geometry>
-            <material name="lightseagreen">
-                <color rgba="0.12549019607843137 0.6980392156862745 0.6666666666666666 1.0"/>
+            <material name="darkgray">
+                <color rgba="0.6627450980392157 0.6627450980392157 0.6627450980392157 1.0"/>
             </material>
         </visual>
         <collision>
@@ -261,8 +261,8 @@
             <geometry>
                 <cylinder length="0.125" radius="0.06"/>
             </geometry>
-            <material name="snow">
-                <color rgba="1.0 0.9803921568627451 0.9803921568627451 1.0"/>
+            <material name="burlywood">
+                <color rgba="0.8705882352941177 0.7215686274509804 0.5294117647058824 1.0"/>
             </material>
         </visual>
     </link>
@@ -284,8 +284,8 @@
             <geometry>
                 <cylinder length="0.4" radius="0.05"/>
             </geometry>
-            <material name="snow">
-                <color rgba="1.0 0.9803921568627451 0.9803921568627451 1.0"/>
+            <material name="burlywood">
+                <color rgba="0.8705882352941177 0.7215686274509804 0.5294117647058824 1.0"/>
             </material>
         </visual>
         <collision>
@@ -311,8 +311,8 @@
             <geometry>
                 <cylinder length="0.125" radius="0.06"/>
             </geometry>
-            <material name="navajowhite">
-                <color rgba="1.0 0.8705882352941177 0.6784313725490196 1.0"/>
+            <material name="black">
+                <color rgba="0.0 0.0 0.0 1.0"/>
             </material>
         </visual>
     </link>
@@ -334,8 +334,8 @@
             <geometry>
                 <cylinder length="0.4" radius="0.05"/>
             </geometry>
-            <material name="navajowhite">
-                <color rgba="1.0 0.8705882352941177 0.6784313725490196 1.0"/>
+            <material name="black">
+                <color rgba="0.0 0.0 0.0 1.0"/>
             </material>
         </visual>
         <collision>

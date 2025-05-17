@@ -16,10 +16,37 @@
             </material>
         </visual>
     </link>
-    <joint name="joint0" type="prismatic">
+    <joint name="joint0_fixed" type="fixed">
         <parent link="base_link"/>
-        <child link="link0"/>
+        <child link="link0_fixed"/>
         <origin xyz="0 0 0.125" rpy="0 0 0"/>
+    </joint>
+    <link name="link0_fixed">
+        <inertial>
+            <mass value="1.0"/>
+            <inertia ixx="0.10166666666666668" iyy="0.10166666666666668" izz="0.10166666666666668" ixy="0.0" ixz="0.0" iyz="0.0"/>
+            <origin xyz="0 0 -0.025" rpy="0 0 0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 -0.025" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.1 1.1 0.05"/>
+            </geometry>
+            <material name="lightslategrey">
+                <color rgba="0.4666666666666667 0.5333333333333333 0.6 1.0"/>
+            </material>
+        </visual>
+        <collision>
+            <origin xyz="0 0 -0.025" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.1 1.1 0.05"/>
+            </geometry>
+        </collision>
+    </link>
+    <joint name="joint0" type="prismatic">
+        <parent link="link0_fixed"/>
+        <child link="link0"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
         <axis xyz="0 1 0"/>
         <limit lower="-0.5" upper="0.5" effort="10" velocity="1"/>
     </joint>
@@ -34,8 +61,8 @@
             <geometry>
                 <cylinder length="0.5" radius="0.05"/>
             </geometry>
-            <material name="rosybrown">
-                <color rgba="0.7372549019607844 0.5607843137254902 0.5607843137254902 1.0"/>
+            <material name="lightslategrey">
+                <color rgba="0.4666666666666667 0.5333333333333333 0.6 1.0"/>
             </material>
         </visual>
         <collision>
@@ -61,8 +88,8 @@
             <geometry>
                 <cylinder length="0.125" radius="0.06"/>
             </geometry>
-            <material name="black">
-                <color rgba="0.0 0.0 0.0 1.0"/>
+            <material name="darkcyan">
+                <color rgba="0.0 0.5450980392156862 0.5450980392156862 1.0"/>
             </material>
         </visual>
     </link>
@@ -84,8 +111,8 @@
             <geometry>
                 <cylinder length="0.3" radius="0.05"/>
             </geometry>
-            <material name="black">
-                <color rgba="0.0 0.0 0.0 1.0"/>
+            <material name="darkcyan">
+                <color rgba="0.0 0.5450980392156862 0.5450980392156862 1.0"/>
             </material>
         </visual>
         <collision>
@@ -98,36 +125,36 @@
     <joint name="joint2" type="prismatic">
         <parent link="link1"/>
         <child link="link2"/>
-        <origin xyz="0 0 0.3" rpy="0 0 0"/>
+        <origin xyz="0 0 0.061" rpy="0 0 0"/>
         <axis xyz="0 0 1"/>
-        <limit lower="-0.5" upper="0.5" effort="10" velocity="1"/>
+        <limit lower="0" upper="0.25" effort="10" velocity="1"/>
     </joint>
     <link name="link2">
         <inertial>
             <mass value="1.0"/>
-            <inertia ixx="0.008125" iyy="0.008125" izz="0.0012500000000000002" ixy="0.0" ixz="0.0" iyz="0.0"/>
-            <origin xyz="0 0 0.15" rpy="0 0 0"/>
+            <inertia ixx="0.00630175" iyy="0.00630175" izz="0.0012500000000000002" ixy="0.0" ixz="0.0" iyz="0.0"/>
+            <origin xyz="0 0 0.1305" rpy="0 0 0"/>
         </inertial>
         <visual>
-            <origin xyz="0 0 0.15" rpy="0 0 0"/>
+            <origin xyz="0 0 0.1305" rpy="0 0 0"/>
             <geometry>
-                <cylinder length="0.3" radius="0.05"/>
+                <cylinder length="0.261" radius="0.05"/>
             </geometry>
-            <material name="darkgray">
-                <color rgba="0.6627450980392157 0.6627450980392157 0.6627450980392157 1.0"/>
+            <material name="lightyellow">
+                <color rgba="1.0 1.0 0.8784313725490196 1.0"/>
             </material>
         </visual>
         <collision>
-            <origin xyz="0 0 0.15" rpy="0 0 0"/>
+            <origin xyz="0 0 0.1305" rpy="0 0 0"/>
             <geometry>
-                <cylinder length="0.3" radius="0.05"/>
+                <cylinder length="0.261" radius="0.05"/>
             </geometry>
         </collision>
     </link>
     <joint name="joint_viz3" type="fixed">
         <parent link="link2"/>
         <child link="joint_viz_link3"/>
-        <origin xyz="0 0 0.3" rpy="0 0 0"/>
+        <origin xyz="0 0 0.261" rpy="0 0 0"/>
     </joint>
     <link name="joint_viz_link3">
         <inertial>
@@ -140,15 +167,15 @@
             <geometry>
                 <cylinder length="0.125" radius="0.06"/>
             </geometry>
-            <material name="lemonchiffon">
-                <color rgba="1.0 0.9803921568627451 0.803921568627451 1.0"/>
+            <material name="deepskyblue">
+                <color rgba="0.0 0.7490196078431373 1.0 1.0"/>
             </material>
         </visual>
     </link>
     <joint name="joint3" type="revolute">
         <parent link="link2"/>
         <child link="link3"/>
-        <origin xyz="0 0 0.3" rpy="0 0 0"/>
+        <origin xyz="0 0 0.261" rpy="0 0 0"/>
         <axis xyz="1 0 0"/>
         <limit lower="-3.14" upper="3.14" effort="10" velocity="1"/>
     </joint>
@@ -163,8 +190,8 @@
             <geometry>
                 <cylinder length="0.5" radius="0.05"/>
             </geometry>
-            <material name="lemonchiffon">
-                <color rgba="1.0 0.9803921568627451 0.803921568627451 1.0"/>
+            <material name="deepskyblue">
+                <color rgba="0.0 0.7490196078431373 1.0 1.0"/>
             </material>
         </visual>
         <collision>
@@ -192,8 +219,8 @@
             <geometry>
                 <sphere radius="0.1"/>
             </geometry>
-            <material name="limegreen">
-                <color rgba="0.19607843137254902 0.803921568627451 0.19607843137254902 1.0"/>
+            <material name="magenta">
+                <color rgba="1.0 0.0 1.0 1.0"/>
             </material>
         </visual>
     </link>
@@ -215,8 +242,8 @@
             <geometry>
                 <sphere radius="0.1"/>
             </geometry>
-            <material name="limegreen">
-                <color rgba="0.19607843137254902 0.803921568627451 0.19607843137254902 1.0"/>
+            <material name="magenta">
+                <color rgba="1.0 0.0 1.0 1.0"/>
             </material>
         </visual>
     </link>
@@ -238,8 +265,8 @@
             <geometry>
                 <sphere radius="0.1"/>
             </geometry>
-            <material name="limegreen">
-                <color rgba="0.19607843137254902 0.803921568627451 0.19607843137254902 1.0"/>
+            <material name="magenta">
+                <color rgba="1.0 0.0 1.0 1.0"/>
             </material>
         </visual>
     </link>
@@ -259,8 +286,8 @@
             <geometry>
                 <cylinder length="0.1" radius="0.05"/>
             </geometry>
-            <material name="limegreen">
-                <color rgba="0.19607843137254902 0.803921568627451 0.19607843137254902 1.0"/>
+            <material name="magenta">
+                <color rgba="1.0 0.0 1.0 1.0"/>
             </material>
         </visual>
         <collision>
