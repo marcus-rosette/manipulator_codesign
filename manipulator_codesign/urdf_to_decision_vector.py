@@ -1,8 +1,8 @@
 import numpy as np
 import xml.etree.ElementTree as ET
 
-from manipulator_codesign.pyb_utils import PybUtils
-from manipulator_codesign.load_robot import LoadRobot
+from pybullet_robokit.pyb_utils import PybUtils
+from pybullet_robokit.load_robot import LoadRobot
 from manipulator_codesign.urdf_gen import URDFGen
 
 

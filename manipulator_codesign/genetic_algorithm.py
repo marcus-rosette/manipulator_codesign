@@ -1,7 +1,7 @@
 import numpy as np
 import random
-from manipulator_codesign.pyb_utils import PybUtils
-from manipulator_codesign.load_objects import LoadObjects
+from pybullet_robokit.pyb_utils import PybUtils
+from pybullet_robokit.load_objects import LoadObjects
 from manipulator_codesign.kinematic_chain import KinematicChainRTB, KinematicChainPyBullet
 
 

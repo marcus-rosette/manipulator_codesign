@@ -1,6 +1,7 @@
 import os
 import pickle
 from datetime import datetime
+import argparse
 
 import numpy as np
 import pandas as pd
@@ -21,7 +22,7 @@ from pymoo.core.callback import Callback
 from manipulator_codesign.moo_decoder import decode_decision_vector
 from manipulator_codesign.urdf_to_decision_vector import encode_seed, urdf_to_decision_vector
 from manipulator_codesign.kinematic_chain import KinematicChainPyBullet
-from manipulator_codesign.load_objects import LoadObjects
+from pybullet_robokit.load_objects import LoadObjects
 
 
 # -------- Seeded & Mixed Operators --------
@@ -272,7 +273,6 @@ class WandbLogger(Callback):
     def notify(self, algorithm):
         F = algorithm.pop.get("F")
         mean_obj = F.mean(axis=0)
-        best_obj = F.min(axis=0)
         
         # objective names
         obj_names = ['pose_error', 'torque', 'joint_count',
@@ -282,15 +282,30 @@ class WandbLogger(Callback):
         # log per-generation aggregates
         log_dict = {"generation": self.gen}
         log_dict.update({f'{obj_names[i]}_mean': mean_obj[i] for i in range(F.shape[1])})
-        # log_dict.update({obj_names[i]: best_obj[i] for i in range(F.shape[1])})
         wandb.log(log_dict, step=self.gen)
 
         self.gen += 1
 
 
-# -------- Main --------
-
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run NSGA2 with optional W&B and mixed-mode logging")
+    parser.add_argument(
+        "--wandb", action="store_true", default=False,
+        help="Enable Weights & Biases logging"
+    )
+    parser.add_argument(
+        "--mixed", dest="mixed", action="store_true",
+        help="Use mixed custom operators"
+    )
+    parser.add_argument(
+        "--no-mixed", dest="mixed", action="store_false",
+        help="Use standard Pymoo operators"
+    )
+    parser.set_defaults(mixed=True)
+    args = parser.parse_args()
+    use_wandb = args.wandb
+    use_mixed = args.mixed
+
     ray.init(num_cpus=os.cpu_count())
 
     # set up operators
@@ -300,61 +315,79 @@ if __name__ == "__main__":
     num_target_pts = 5
     var_types = ['int'] + ['int','int','real'] * max_joints
 
-    # Find the nsga2_seeds directory relative to this script
+    # Find the urdf seeds
     script_dir = os.path.dirname(os.path.abspath(__file__))
     urdf_dir = os.path.join(script_dir, 'urdf', 'robots', 'nsga2_seeds')
     urdfs = [os.path.join(urdf_dir, f) for f in os.listdir(urdf_dir) if f.endswith('.urdf')]
     raw_seeds = [urdf_to_decision_vector(u) for u in urdfs]
     seeds     = [encode_seed(s, max_joints=max_joints) for s in raw_seeds]
 
-    fallback  = MixedSampling(var_types)
-    sampling  = SeededSampling(var_types, seeds, fallback)
-    crossover = MixedCrossover(var_types)
-    mutation  = MixedMutation(var_types,
-                              prob_real=1.0/(1+3*max_joints),
-                              prob_int=0.1)
-
     targets = np.random.uniform([-2,0,0],[2,2,2],(num_target_pts,3)).tolist()
     problem = KinematicChainProblem(targets, seeds=seeds, cal_samples=15)
 
-    api_key = os.environ.get("WANDB_API_KEY")
-    if api_key is None:
-        raise RuntimeError("Please set WANDB_API_KEY in your environment")
-    wandb.login(key=api_key)
+    callback = None
+    if use_wandb:
+        api_key = os.environ.get("WANDB_API_KEY")
+        if api_key is None:
+            raise RuntimeError("Please set WANDB_API_KEY in your environment to use W&B")
+        wandb.login(key=api_key)
+        wandb.init(
+            project="manipulator_codesign",
+            entity="rosettem-oregon-state-university",
+            name=f"nsga2_run_{datetime.now():%Y%m%d_%H%M%S}",
+            config={
+                "pop_size": num_population,
+                "n_gen": num_generations,
+                "min_joints": problem.min_joints,
+                "max_joints": problem.max_joints,
+                "alpha": problem.alpha,
+                "beta": problem.beta,
+                "delta": problem.delta,
+                "gamma": problem.gamma,
+                "sampling": "Seeded+Mixed",
+                "crossover": "MixedCrossover",
+                "mutation": "MixedMutation"
+            }
+        )
+        callback = WandbLogger()
 
-    # Initialize W&B
-    wandb.init(
-        project="manipulator_codesign",
-        entity="rosettem-oregon-state-university",
-        name=f"nsga2_run_{datetime.now():%Y%m%d_%H%M%S}",
-        config={
-            "pop_size": num_population,
-            "n_gen": num_generations,
-            "min_joints": problem.min_joints,
-            "max_joints": problem.max_joints,
-            "alpha": problem.alpha,
-            "beta": problem.beta,
-            "delta": problem.delta,
-            "gamma": problem.gamma,
-            "sampling": "Seeded+Mixed",
-            "crossover": "MixedCrossover",
-            "mutation": "MixedMutation"
-        }
-    )
+    # algorithm selection
+    if use_mixed:
+        print('using mixed')
+        sampling  = SeededSampling(var_types, seeds, MixedSampling(var_types))
+        crossover = MixedCrossover(var_types)
+        mutation  = MixedMutation(var_types,
+                                  prob_real=1.0/(1+3*max_joints),
+                                  prob_int=0.1)
+        algo = NSGA2(
+            pop_size=num_population,
+            sampling=sampling,
+            crossover=crossover,
+            mutation=mutation,
+            eliminate_duplicates=True
+        )
+    else:
+        print('using basic')
+        algo = NSGA2(
+            pop_size=num_population,
+            sampling=LatinHypercubeSampling(),
+            crossover=SimulatedBinaryCrossover(prob=0.9, eta=15),
+            mutation=PolynomialMutation(prob=1.0/problem.n_var, eta=20),
+            eliminate_duplicates=True
+        )
 
-    callback = WandbLogger()
-    algo = NSGA2(pop_size=num_population,
-                 sampling=sampling,
-                 crossover=crossover,
-                 mutation=mutation,
-                 eliminate_duplicates=True)
+    # dynamic minimize call: include callback only if set
+    minimize_kwargs = {
+        'problem': problem,
+        'algorithm': algo,
+        'termination': ('n_gen', num_generations),
+        'seed': 1,
+        'verbose': True
+    }
+    if callback is not None:
+        minimize_kwargs['callback'] = callback
 
-    res = minimize(problem,
-                   algo,
-                   termination=('n_gen', num_generations),
-                   seed=1,
-                   verbose=True,
-                   callback=callback)
+    res = minimize(**minimize_kwargs)
 
     # save results locally
     os.makedirs('data/nsga2_results', exist_ok=True)
@@ -363,8 +396,8 @@ if __name__ == "__main__":
         pickle.dump({'X': res.X, 'F': res.F}, f)
     print(f"Saved results to {fn}")
 
-    # log as W&B artifact
-    artifact = wandb.Artifact('nsga2-results', type='dataset')
-    artifact.add_file(fn)
-    wandb.log_artifact(artifact)
-    wandb.finish()
+    if use_wandb:
+        artifact = wandb.Artifact('nsga2-results', type='dataset')
+        artifact.add_file(fn)
+        wandb.log_artifact(artifact)
+        wandb.finish()
