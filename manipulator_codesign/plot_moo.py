@@ -5,10 +5,11 @@ import numpy as np
 import pickle
 import os
 
+from pybullet_robokit.pyb_utils import PybUtils
+from pybullet_robokit.load_objects import LoadObjects
 from manipulator_codesign.moo_decoder import decode_decision_vector
-from manipulator_codesign.pyb_utils import PybUtils
-from manipulator_codesign.load_objects import LoadObjects
 from manipulator_codesign.kinematic_chain import KinematicChainPyBullet
+from manipulator_codesign.urdf_gen import URDFGen
 
 
 def parse_arguments():
@@ -40,10 +41,8 @@ if __name__ == "__main__":
     with open(results_path, "rb") as f:
         results_dict = pickle.load(f)
 
-    res_X = results_dict['decision_vecs']
-    res_F = results_dict['objective_vals']
-    min_joints = results_dict['min_joints']
-    max_joints = results_dict['max_joints']
+    res_X = results_dict['X'] 
+    res_F = results_dict['F'] 
 
     if args.create_urdf:
         pyb = PybUtils(renders=args.renders)
@@ -53,7 +52,8 @@ if __name__ == "__main__":
         best_idx = np.argmin(distances)
         best_decision_vector = res_X[best_idx]
 
-        num_joints, joint_types, joint_axes, link_lengths = decode_decision_vector(best_decision_vector, min_joints, max_joints)
+        num_joints, joint_types, joint_axes, link_lengths = decode_decision_vector(best_decision_vector, 4, 7)
+        joint_types = [URDFGen.map_joint_type_inverse(joint_type) for joint_type in joint_types]
         best_chain = KinematicChainPyBullet(pyb.con, num_joints, joint_types, joint_axes, link_lengths, robot_name="NSGA_robot_balanced")
 
         best_chain.create_urdf()

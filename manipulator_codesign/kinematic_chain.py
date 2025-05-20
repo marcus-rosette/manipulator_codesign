@@ -5,8 +5,8 @@ from scipy.linalg import svdvals
 from spatialmath import SE3
 from scipy.spatial.transform import Rotation as R
 from manipulator_codesign.urdf_gen import URDFGen
-from manipulator_codesign.load_robot import LoadRobot
-from manipulator_codesign.motion_planners import KinematicChainMotionPlanner
+from pybullet_robokit.load_robot import LoadRobot
+from pybullet_robokit.motion_planners import KinematicChainMotionPlanner
 
 
 # Base class with shared parameters and methods

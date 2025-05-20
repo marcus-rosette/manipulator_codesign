@@ -16,7 +16,7 @@ from manipulator_codesign.kinematic_chain import KinematicChainPyBullet
 
 
 class KinematicChainProblem(Problem):
-    def __init__(self, target_positions, backend='pybullet', renders=False, min_joints=2, max_joints=5, alpha=10.0, beta=0.1, delta=0.1, gamma=3.0):
+    def __init__(self, target_positions, renders=False, min_joints=2, max_joints=5, alpha=10.0, beta=0.1, delta=0.1, gamma=3.0):
         """
         Define the NSGA-II optimization problem for kinematic chain design.
         
@@ -48,22 +48,11 @@ class KinematicChainProblem(Problem):
         
         super().__init__(n_var=len(xl), n_obj=self.n_obj, n_constr=0, xl=np.array(xl), xu=np.array(xu))
         
-        self.backend = backend
-        if self.backend == 'pybullet':
-            # Initialize PyBullet utilities.
-            from manipulator_codesign.pyb_utils import PybUtils
-            from manipulator_codesign.load_objects import LoadObjects
-            self.pyb = PybUtils(renders=renders)
-            self.object_loader = LoadObjects(self.pyb.con)
-        
-    def _chain_factory(self, num_joints, joint_types, joint_axes, link_lengths):
-        """
-        Create a kinematic chain instance using the chosen backend.
-        """
-        if self.backend == 'pybullet':
-            return KinematicChainPyBullet(self.pyb.con, num_joints, joint_types, joint_axes, link_lengths)
-        else:
-            return KinematicChainRTB(num_joints, joint_types, joint_axes, link_lengths)
+        # Initialize PyBullet utilities.
+        from pybullet_robokit.pyb_utils import PybUtils
+        from pybullet_robokit.load_objects import LoadObjects
+        self.pyb = PybUtils(renders=renders)
+        self.object_loader = LoadObjects(self.pyb.con)
         
     def _evaluate(self, X, out, *args, **kwargs):
         """
@@ -91,7 +80,7 @@ class KinematicChainProblem(Problem):
             num_joints, joint_types, joint_axes, link_lengths = decode_decision_vector(x, self.min_joints, self.max_joints)
             
             # Create the chain.
-            chain = self._chain_factory(num_joints, joint_types, joint_axes, link_lengths)
+            chain = KinematicChainPyBullet(num_joints, joint_types, joint_axes, link_lengths)
             
             # Build and load the robot if needed.
             if not chain.is_built:
