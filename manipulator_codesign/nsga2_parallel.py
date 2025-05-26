@@ -20,7 +20,7 @@ from pymoo.optimize import minimize
 from pymoo.core.callback import Callback 
 
 from manipulator_codesign.moo_decoder import decode_decision_vector
-from manipulator_codesign.urdf_to_decision_vector import encode_seed, urdf_to_decision_vector
+from manipulator_codesign.urdf_to_decision_vector import encode_seed, urdf_to_decision_vector, load_seeds
 from manipulator_codesign.kinematic_chain import KinematicChainPyBullet
 from pybullet_robokit.load_objects import LoadObjects
 
@@ -318,9 +318,7 @@ if __name__ == "__main__":
     # Find the urdf seeds
     script_dir = os.path.dirname(os.path.abspath(__file__))
     urdf_dir = os.path.join(script_dir, 'urdf', 'robots', 'nsga2_seeds')
-    urdfs = [os.path.join(urdf_dir, f) for f in os.listdir(urdf_dir) if f.endswith('.urdf')]
-    raw_seeds = [urdf_to_decision_vector(u) for u in urdfs]
-    seeds     = [encode_seed(s, max_joints=max_joints) for s in raw_seeds]
+    seeds = load_seeds(urdf_dir, max_joints=max_joints)
 
     targets = np.random.uniform([-2,0,0],[2,2,2],(num_target_pts,3)).tolist()
     problem = KinematicChainProblem(targets, seeds=seeds, cal_samples=15)
@@ -353,7 +351,6 @@ if __name__ == "__main__":
 
     # algorithm selection
     if use_mixed:
-        print('using mixed')
         sampling  = SeededSampling(var_types, seeds, MixedSampling(var_types))
         crossover = MixedCrossover(var_types)
         mutation  = MixedMutation(var_types,
@@ -367,7 +364,6 @@ if __name__ == "__main__":
             eliminate_duplicates=True
         )
     else:
-        print('using basic')
         algo = NSGA2(
             pop_size=num_population,
             sampling=LatinHypercubeSampling(),
@@ -390,8 +386,9 @@ if __name__ == "__main__":
     res = minimize(**minimize_kwargs)
 
     # save results locally
-    os.makedirs('data/nsga2_results', exist_ok=True)
-    fn = os.path.join('data', f"results_{datetime.now():%Y%m%d_%H%M%S}.pkl")
+    data_dir = 'data/nsga2_results'
+    os.makedirs(data_dir, exist_ok=True)
+    fn = os.path.join(data_dir, f"results_{datetime.now():%Y%m%d_%H%M%S}.pkl")
     with open(fn, 'wb') as f:
         pickle.dump({'X': res.X, 'F': res.F}, f)
     print(f"Saved results to {fn}")
