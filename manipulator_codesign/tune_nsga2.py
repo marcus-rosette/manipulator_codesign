@@ -96,7 +96,10 @@ if __name__ == '__main__':
     multi = MultiRun(
         problem=base_problem,
         seeds=list(range(1, args.tune_seeds+1)),
-        func_stats=lambda Fs: np.mean([Hypervolume(ref_point=hv_ref).do(F) for F in Fs]),
+        func_stats=lambda Fs: np.mean([
+            Hypervolume(ref_point=hv_ref).do(F.F) 
+            for F in Fs if F.F is not None and len(F.F) > 0
+        ]),
         termination=('n_gen', args.tune_gen)
     )
 
