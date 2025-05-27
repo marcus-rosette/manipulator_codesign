@@ -98,7 +98,7 @@ if __name__ == '__main__':
         seeds=list(range(1, args.tune_seeds+1)),
         func_stats=lambda Fs: {
             "hv": np.mean([Hypervolume(ref_point=hv_ref).do(F.F) for F in Fs])
-        }
+        },
         termination=('n_gen', args.tune_gen)
     )
 
