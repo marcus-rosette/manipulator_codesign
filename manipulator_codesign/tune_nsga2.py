@@ -112,13 +112,13 @@ if __name__ == '__main__':
 
     # 7) Run the hyperparameter optimization with Optuna
     print("[Step 7] Starting hyperparameter tuning with Optuna...")
-    callbacks = [WandbHPLogger()] if args.wandb else None
+    hp_callback = WandbHPLogger() if args.wandb else None
     res = minimize(
         problem=hp,
         algorithm=Optuna(),
         termination=('n_eval', args.trials),
         seed=42,
-        callback=callbacks,
+        callback=hp_callback,
         verbose=True
     )
 
