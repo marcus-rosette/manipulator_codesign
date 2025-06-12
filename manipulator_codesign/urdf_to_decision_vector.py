@@ -151,7 +151,7 @@ def load_seeds(urdf_dir, max_joints=7):
 
 
 if __name__ == "__main__":
-    urdf_path = "manipulator_codesign/urdf/robots/nsga2_seeds/gen_seed_7.urdf"
+    urdf_path = "manipulator_codesign/urdf/robots/nsga2_seeds/gen_seed_9.urdf"
     total_joint_count, joint_types, joint_axes, link_lengths = urdf_to_decision_vector(
         urdf_path
     )
@@ -159,6 +159,9 @@ if __name__ == "__main__":
     joint_axes = [(0.0, 0.0, 0.0) if isinstance(item, list) and all(isinstance(subitem, tuple) for subitem in item) else item
                 for item in joint_axes]
     print("Total joints in the system:", total_joint_count)
+    joint_types = [URDFGen.map_joint_type_inverse(jt) for jt in joint_types]
     print("Joint types:", joint_types)
+    joint_axes = [' '.join(map(str, map(int, ja))) for ja in joint_axes]
+    joint_axes = [URDFGen.map_axis_inverse(ja) for ja in joint_axes]
     print("Joint axes:", joint_axes)
     print("Link lengths:", link_lengths)
