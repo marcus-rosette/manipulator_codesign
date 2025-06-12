@@ -96,7 +96,9 @@ if __name__ == '__main__':
     multi = MultiRun(
         problem=base_problem,
         seeds=list(range(1, args.tune_seeds+1)),
-        func_stats=lambda Fs: np.mean([Hypervolume(ref_point=hv_ref).do(F) for F in Fs]),
+        func_stats=lambda Fs: {
+            "hv": np.mean([Hypervolume(ref_point=hv_ref).do(F.F) for F in Fs])
+        },
         termination=('n_gen', args.tune_gen)
     )
 
@@ -110,13 +112,13 @@ if __name__ == '__main__':
 
     # 7) Run the hyperparameter optimization with Optuna
     print("[Step 7] Starting hyperparameter tuning with Optuna...")
-    callbacks = [WandbHPLogger()] if args.wandb else None
+    hp_callback = WandbHPLogger() if args.wandb else None
     res = minimize(
         problem=hp,
         algorithm=Optuna(),
         termination=('n_eval', args.trials),
         seed=42,
-        callback=callbacks,
+        callback=hp_callback,
         verbose=True
     )
 
