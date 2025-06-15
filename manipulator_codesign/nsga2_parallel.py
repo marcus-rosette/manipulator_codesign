@@ -228,7 +228,7 @@ class KinematicChainProblem(Problem):
         # mesh_path = "manipulator_codesign/manipulator_codesign/meshes/before_mesh_transformed.obj"
         # robot_urdf = "manipulator_codesign/manipulator_codesign/urdf/robots/amiga.urdf"
         mesh_path = os.path.join(script_dir, "meshes", "before_mesh_transformed.obj")
-        robot_urdf = os.path.join(script_dir, "urdfs", "robots", "amiga.urdf")
+        robot_urdf = os.path.join(script_dir, "urdf", "robots", "amiga.urdf")
         flags = 0
         self.actors = [
             Evaluator.options(max_concurrency=1).remote(
