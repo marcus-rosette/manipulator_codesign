@@ -255,8 +255,8 @@ class URDFGen:
             self.create_link(
                 name=ball_joint_link_name,
                 type='cylinder',
-                link_len=0.125,
-                link_width=0.06,
+                link_len=0.05,
+                link_width=0.03,
                 mass=0,
                 origin=origin,
                 material=color_name,
@@ -360,7 +360,7 @@ class URDFGen:
         self.robot.append(self.create_joint('end_effector_joint', 'probe_link', 'end_effector', [0, 0, 0.1, 0, 0, 0], 'fixed'))
         self.robot.append(self.create_link('end_effector', link_len=0, link_width=0, mass=0, collision=False))
     
-    def create_manipulator(self, axes, joint_types, link_lens, joint_lims, link_width=0.05, link_shape='cylinder', collision=False, gripper=False):
+    def create_manipulator(self, axes, joint_types, link_lens, joint_lims, link_width=0.025, link_shape='cylinder', collision=False, gripper=False):
         """
         Creates a manipulator robot model with specified parameters.
 
@@ -385,13 +385,13 @@ class URDFGen:
         self.robot.append(
             self.create_link(name=base_link_name, 
                              type='box', 
-                             link_len=base_link_size,
+                             link_len=base_link_size * 3,
                              link_width=base_link_size,
                              link_height=base_link_size,
                              mass=1,
                              material='gray', 
                              color=[0.5, 0.5, 0.5, 1], 
-                             collision=False))
+                             collision=True))
         
         parent_name = base_link_name
         parent_length = base_link_size / 2
@@ -582,7 +582,7 @@ class URDFGen:
         elif type == 'sphere':
             ixx = (2/5) * mass * link_width**2
             iyy = (2/5) * mass * link_width**2
-            izz = (2/5) * mass * link_width**2
+            izz = (2/5) * mass * link_width**2                      
         else:
             raise ValueError("Unsupported shape type for inertia calculation.")
 
@@ -596,9 +596,9 @@ if __name__ == '__main__':
     robot_name = 'test_robot'
     urdf_gen = URDFGen(robot_name)
 
-    joint_types = [2,0,2,0,2]
-    axes = [0,2,0,2,0]
-    link_lens = [0.75, 0.75, 0.5, 0.5, 0.4]
+    joint_types = [1,1,1,1,1,1, 1]
+    axes = [2, 0, 2, 0, 0, 0, 1]
+    link_lens = [0.18492212902085836, 0.17156635769165474, 0.12885746080456145, 0.18676023292324082, 0.1932321322189355, 0.17785673002780472, 0.19505110993310779] 
 
     joint_limit_prismatic = (-0.5, 0.5)
     joint_limit_revolute = (-3.14, 3.14)

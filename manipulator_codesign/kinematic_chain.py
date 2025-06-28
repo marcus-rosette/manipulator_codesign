@@ -134,6 +134,7 @@ class KinematicChainPyBullet(KinematicChainBase):
         self.is_loaded = False
 
         self.default_joint_config = [0.0] * self.num_joints
+        self.max_rrt_cost_seen = 0.0
 
     def build_robot(self):
         # Create a URDF for this chain.
@@ -158,15 +159,15 @@ class KinematicChainPyBullet(KinematicChainBase):
 
     def compute_chain_metrics(self, targets, targets_offset):
         # Compute the mean pose error and mean torque for the given targets.
-        pose_errors, self.target_joint_positions = zip(*[self.compute_pose_fitness(target) for target in targets_offset])
+        pose_errors, self.target_joint_positions = zip(*[self.compute_pose_fitness(target) for target in targets])
         self.mean_pose_error = np.mean(pose_errors)
 
         # Compute the rrt path cost for the target joint positions with the tree collision mesh.
         rrt_path_costs = [self.compute_rrt_path_cost(joint_positions, collision_objects=self.collision_objects) for joint_positions in self.target_joint_positions]
         self.mean_rrt_path_cost = np.mean(rrt_path_costs)
 
-        # Remove the last collision object (assumed to be the tree mesh). This is necessary to get global metrics of torque, GCI, and manipulability.
-        self.pyb_con.removeBody(self.collision_objects[-1])  
+        # # Remove the last collision object (assumed to be the tree mesh). This is necessary to get global metrics of torque, GCI, and manipulability.
+        # self.pyb_con.removeBody(self.collision_objects[-1])  
 
         self.mean_torque = np.mean([self.compute_gravity_torque_magnitute(joint_positions) for joint_positions in self.target_joint_positions])
 
@@ -231,12 +232,16 @@ class KinematicChainPyBullet(KinematicChainBase):
 
         path = self.motion_planner.rrt_path(home, target_config, collision_objects, rrt_iter=500)
         if path is None:
-            return 1e3   # no collision-free path found
+            # return 1e3   # no collision-free path found
+            return 1.1 * self.max_rrt_cost_seen
 
         # path cost = sum of successive L2 distances
         cost = 0.0
         for a, b in zip(path[:-1], path[1:]):
             cost += np.linalg.norm(np.array(a) - np.array(b))
+        
+        # update the maximum RRT cost seen so far
+        self.max_rrt_cost_seen = max(self.max_rrt_cost_seen, cost)
         return cost
     
     def compute_motion_plan_fitness(self, pose_waypoints):
@@ -350,16 +355,16 @@ class KinematicChainPyBullet(KinematicChainBase):
         Returns:
             tuple: Final joint configuration and fitness metrics.
         """
-        target_pos, target_orientation = target_pose
+        # target_pos, target_orientation = target_pose
+        target_pos, target_orientation = target_pose if len(target_pose) == 2 else (target_pose, None)
 
         # TODO: Add smart orientation selection based on target point. Currently only suited for approaches in positive y direction
         # Compute the target pose (position and orientation)
         target_orientations = [
             np.array([180, 0, 90]), # top-down (-z)
             np.array([90, 0, 180]), # front-back (+y)
-            np.array([0, 0, -90]), # bottom-up (+z)
             np.array([90, 0, -90]), # right-left (-x)
-            np.array([90, 0, 180]), # front-back (+y)
+            np.array([90, 0, 0]), # back-front (-y)
             np.array([90, 0, 90]), # left-right (+x)
         ]
 

@@ -145,12 +145,11 @@ class Evaluator:
         self.p.setGravity(0, 0, -9.81)
 
         # single‐time mesh load
-        self.tree_collision_shape = self.p.createCollisionShape(
-            shapeType=self.p.GEOM_MESH,
-            fileName=mesh_path,
-            flags=self.p.GEOM_FORCE_CONCAVE_TRIMESH
+        self.collision_dim = [2, 0.3, 0.125]
+        self.collision_id = self.p.createCollisionShape(
+            shapeType=self.p.GEOM_BOX,
+            halfExtents=self.collision_dim
         )
-        self.robot_urdf = robot_urdf
         self.mobile_base_translation = mobile_base_translation
         self.flags = flags
 
@@ -161,21 +160,19 @@ class Evaluator:
 
         # load robot
         object_loader = LoadObjects(p)
-        amiga_id = object_loader.load_urdf(
-            self.robot_urdf,
-            start_pos=self.mobile_base_translation,
-            start_orientation=[0,0,0],
-            fix_base=True,
-            flags=self.flags
-        )
 
-        # load tree once per evaluation
-        tree_id = p.createMultiBody(
-            baseCollisionShapeIndex=self.tree_collision_shape,
-            baseVisualShapeIndex=-1,
-            basePosition=[0,0,0]
+        # load collision object rows
+        row_left_id = self.p.createMultiBody(
+            baseMass=0,
+            baseCollisionShapeIndex=self.collision_id,
+            basePosition=[0, -(self.collision_dim[1] + self.collision_dim[1]/2), self.collision_dim[2]]
         )
-        object_loader.collision_objects.extend([amiga_id, tree_id])
+        row_right_id = self.p.createMultiBody(
+            baseMass=0,
+            baseCollisionShapeIndex=self.ollision_id,
+            basePosition=[0, (self.collision_dim[1] + self.collision_dim[1]/2), self.collision_dim[2]]
+        )
+        object_loader.collision_objects.extend([row_left_id, row_right_id])
 
         # decode and build kinematic chain
         n, types, axes, lengths = decode_decision_vector(x, min_j, max_j)
@@ -206,7 +203,7 @@ class Evaluator:
 # -------- Problem Definition --------
 class KinematicChainProblem(Problem):
     def __init__(self, targets, targets_offset, robot_translation, mobile_base_translation,
-                 seeds, min_joints=2, max_joints=7,
+                 xl, xu, seeds, min_joints=2, max_joints=7,
                  alpha=1, beta=1, delta=1, gamma=1,
                  cal_samples=15, num_actors=4):
         print("[KinematicChainProblem] Initializing and calibrating...")
@@ -217,25 +214,18 @@ class KinematicChainProblem(Problem):
         self.min_joints, self.max_joints = min_joints, max_joints
         self.alpha, self.beta, self.delta, self.gamma = alpha, beta, delta, gamma
 
-        xl = [min_joints] + [0,0,0.05] * max_joints
-        xu = [max_joints] + [2,2,0.75] * max_joints
         super().__init__(n_var=len(xl), n_obj=6, xl=np.array(xl), xu=np.array(xu))
 
         self._x_cal = self._make_calibration_batch(seeds, cal_samples)
 
         # create a pool of Evaluator actors
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        # mesh_path = "manipulator_codesign/manipulator_codesign/meshes/before_mesh_transformed.obj"
-        # robot_urdf = "manipulator_codesign/manipulator_codesign/urdf/robots/amiga.urdf"
-        mesh_path = os.path.join(script_dir, "meshes", "before_mesh_transformed.obj")
-        robot_urdf = os.path.join(script_dir, "urdf", "robots", "amiga.urdf")
         flags = 0
         self.actors = [
             Evaluator.options(max_concurrency=1).remote(
-                mesh_path,
-                robot_urdf,
-                self.mobile_base_translation,
-                flags
+                mesh_path="",
+                robot_urdf="",
+                mobile_base_translation=self.mobile_base_translation,
+                flags=flags
             )
             for _ in range(num_actors)
         ]
@@ -371,12 +361,20 @@ if __name__ == "__main__":
     use_wandb = args.wandb
     use_mixed = args.mixed
 
-    ray.init(num_cpus=os.cpu_count())
-
+    ##########################################################
+    ################### INTPUT PARAMETERS ####################
     # set up operators
+    min_joints = 4
     max_joints = 7
-    num_generations = 150
-    num_population = 250
+    num_generations = 20
+    num_population = 16
+    joint_type_search = [1] # 0: prismatic, 1: revolute, 2: spherical --- Typical range [0, 1, 2]
+    joint_axis_search = [0, 1, 2] # 0: x, 1: y, 2: z
+    link_length_search = [0.05, 0.2] # range in meters
+    nun_calibration_samples = 3
+    num_actors = os.cpu_count() // 2  # tune this to control memory vs. throughput
+    ray.init(num_cpus=num_actors) # Intialize Ray with the number of actors (cpus)
+
     var_types = ['int'] + ['int','int','real'] * max_joints
 
     # Find the urdf seeds
@@ -385,36 +383,37 @@ if __name__ == "__main__":
     seeds = load_seeds(urdf_dir, max_joints=max_joints)
 
     # Set the robot starting position and translation
-    # CURRENT MESH X-BOUND: [-6.2, 7.7]
-    robot_to_amiga_translation = [0, 0, 1.025]
-    amiga_to_robot_translation = [0, -0.3, 0]
-    robot_system_translation = [-5.0, -2.5, 0.0]
-
+    robot_to_amiga_translation = [0, 0, 0]
+    amiga_to_robot_translation = [0, 0, 0]
+    robot_system_translation = [0, 0, 0.125]
     robot_translation = np.add(robot_to_amiga_translation, robot_system_translation)
     amiga_translation = np.add(amiga_to_robot_translation, robot_system_translation)
-    
-    # Load target prune points 
-    window_x_position = robot_system_translation[0]
-    window_size = 2
 
-    target_poses, target_offset_poses = orchard_ws.get_prune_poses_from_yaml(
-        yaml_path='manipulator_codesign/prune_data/all_branches_info.yaml',
-        robot_base=robot_translation,
-        window_size=window_size,
-        min_y=None,
-        max_y=0.0,
-        )
-    
-    print(len(target_poses))
+    lower_parameter_search_bound = [min_joints] + [joint_type_search[0],joint_axis_search[0],link_length_search[0]] * max_joints
+    upper_parameter_search_bound = [max_joints] + [joint_type_search[-1],joint_axis_search[-1],link_length_search[-1]] * max_joints
+
+    num_points_per_band = 10
+    x_bounds = (-0.8, 0.8)
+    y_band_bounds = [(-0.75, -0.15), (0.15, 0.75)]
+    z_value = 0.27
+    x = np.random.uniform(*x_bounds, (2, num_points_per_band))
+    y = np.array([np.random.uniform(low, high, num_points_per_band) for (low, high) in y_band_bounds])
+    z = np.full((2, num_points_per_band), z_value)
+    target_points = np.vstack([np.column_stack((x[i], y[i], z[i])) for i in range(2)])
+    target_offset_pts = None
+    ##########################################################
+    ##########################################################
 
     problem = KinematicChainProblem(
-        target_poses,
-        target_offset_poses,
+        targets=target_points,
+        targets_offset=target_offset_pts,
         robot_translation=robot_translation,
         mobile_base_translation=amiga_translation,
+        xl=lower_parameter_search_bound,
+        xu=upper_parameter_search_bound,
         seeds=seeds,
-        cal_samples=3,
-        num_actors=os.cpu_count() // 2       # tune this to control memory vs. throughput
+        cal_samples=nun_calibration_samples,
+        num_actors=num_actors
     )
 
     callback = None
