@@ -55,7 +55,7 @@ def get_logical_joints(robot):
             seen.add(j)
     return logical
 
-def urdf_to_decision_vector(urdf_path):
+def urdf_to_decision_vector(urdf_path, ee_link_name='end_effector'):
     # 1) load robot and let it detect spherical groups
     pyb = PybUtils(renders=False)
     robot = LoadRobot(
@@ -65,7 +65,7 @@ def urdf_to_decision_vector(urdf_path):
         pyb.con.getQuaternionFromEuler([0, 0, 0]),
         home_config=None,
         collision_objects=[],
-        ee_link_name='end_effector',
+        ee_link_name=ee_link_name,
     )
 
     # 2) parse URDF once for true cylinder lengths

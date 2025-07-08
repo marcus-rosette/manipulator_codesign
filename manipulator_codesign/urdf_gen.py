@@ -255,7 +255,7 @@ class URDFGen:
             self.create_link(
                 name=ball_joint_link_name,
                 type='cylinder',
-                link_len=0.05,
+                link_len=0.06,
                 link_width=0.03,
                 mass=0,
                 origin=origin,
@@ -353,11 +353,12 @@ class URDFGen:
         Returns:
             None
         """
+        probe_length = 0.1
         # Create a probe end effector
         self.robot.append(self.create_joint('probe_joint', parent, 'probe_link', [0, 0, last_link_length, 0, 0, 0], 'fixed'))
-        self.robot.append(self.create_link('probe_link', link_len=0.1, link_width=0.01, mass=0, collision=False))
+        self.robot.append(self.create_link('probe_link', link_len=probe_length, link_width=0.005, mass=0, collision=False))
 
-        self.robot.append(self.create_joint('end_effector_joint', 'probe_link', 'end_effector', [0, 0, 0.1, 0, 0, 0], 'fixed'))
+        self.robot.append(self.create_joint('end_effector_joint', 'probe_link', 'end_effector', [0, 0, probe_length/2, 0, 0, 0], 'fixed'))
         self.robot.append(self.create_link('end_effector', link_len=0, link_width=0, mass=0, collision=False))
     
     def create_manipulator(self, axes, joint_types, link_lens, joint_lims, link_width=0.025, link_shape='cylinder', collision=False, gripper=False):
@@ -422,7 +423,7 @@ class URDFGen:
                                     origin=[0, 0, parent_length, 0, 0, 0]))
             
             if joint_type == 'spherical':
-                sphere_radius = 0.1
+                sphere_radius = 0.05
                 spherical_joint, sphere_link = self.add_mock_spherical_joint(
                                                     parent=parent_name,
                                                     radius=sphere_radius,
@@ -596,11 +597,11 @@ if __name__ == '__main__':
     robot_name = 'test_robot'
     urdf_gen = URDFGen(robot_name)
 
-    joint_types = [1,1,1,1,1,1, 1]
-    axes = [2, 0, 2, 0, 0, 0, 1]
-    link_lens = [0.18492212902085836, 0.17156635769165474, 0.12885746080456145, 0.18676023292324082, 0.1932321322189355, 0.17785673002780472, 0.19505110993310779] 
+    joint_types = [0, 0]
+    axes = [0, 1]
+    link_lens = [0.03, 0.2] 
 
-    joint_limit_prismatic = (-0.5, 0.5)
+    joint_limit_prismatic = (-0.1, 0.1)
     joint_limit_revolute = (-3.14, 3.14)
 
     # Map joint limits based on joint type

@@ -134,7 +134,7 @@ class KinematicChainPyBullet(KinematicChainBase):
         self.is_loaded = False
 
         self.default_joint_config = [0.0] * self.num_joints
-        self.max_rrt_cost_seen = 0.0
+        self.max_rrt_cost_seen = 10.0
 
     def build_robot(self):
         # Create a URDF for this chain.
@@ -157,19 +157,54 @@ class KinematicChainPyBullet(KinematicChainBase):
         # Initialize motion planner
         self.motion_planner = KinematicChainMotionPlanner(self.robot)
 
+    def sample_collision_free_poses(self, pose_candidates):
+        target_poses = []
+        target_joint_configs = []
+
+        for target_candidate in pose_candidates:
+            for j, target_pose in enumerate(target_candidate):
+                target_pose = tuple(target_pose)
+                joint_config = self.robot.inverse_kinematics(target_pose)
+                self.robot.reset_joint_positions(joint_config)
+                if not self.robot.collision_check(self.robot.robotId, self.collision_objects) and not self.robot.check_self_collision(joint_config):
+                    target_poses.append(target_pose)
+                    target_joint_configs.append(joint_config)
+                    # print(f"Found collision-free orientation for target point {target_candidate[0][0]} at index {j}.")
+                    break
+            else:
+                # If we never `break`, no collision-free orientation was found.
+                # Use the last pose's position but a default “front-facing (+y)” quaternion.
+                last_pose = target_candidate[-1]
+                pos = np.asarray(last_pose[0])
+                default_quat = np.array((1, 0, 0, 0))
+                fallback = (pos, default_quat)
+                target_poses.append(fallback)
+                target_joint_configs.append(joint_config)  # Use home config as fallback
+
+                # print(f"Warning: No collision-free orientation found for target point {target_candidate[0][0]}. Using fallback orientation.")
+
+        return target_poses, target_joint_configs
+
     def compute_chain_metrics(self, targets, targets_offset):
         # Compute the mean pose error and mean torque for the given targets.
         pose_errors, self.target_joint_positions = zip(*[self.compute_pose_fitness(target) for target in targets])
         self.mean_pose_error = np.mean(pose_errors)
+        self.std_pose_error = np.std(pose_errors)
 
         # Compute the rrt path cost for the target joint positions with the tree collision mesh.
         rrt_path_costs = [self.compute_rrt_path_cost(joint_positions, collision_objects=self.collision_objects) for joint_positions in self.target_joint_positions]
         self.mean_rrt_path_cost = np.mean(rrt_path_costs)
+        self.std_rrt_path_cost = np.std(rrt_path_costs)
 
-        # # Remove the last collision object (assumed to be the tree mesh). This is necessary to get global metrics of torque, GCI, and manipulability.
-        # self.pyb_con.removeBody(self.collision_objects[-1])  
+        # Remove the last collision object (assumed to be the tree mesh). This is necessary to get global metrics of torque, GCI, and manipulability.
+        self.pyb_con.removeBody(self.collision_objects[-1])  
 
-        self.mean_torque = np.mean([self.compute_gravity_torque_magnitute(joint_positions) for joint_positions in self.target_joint_positions])
+        torques = [
+            self.compute_gravity_torque_magnitute(joint_positions)
+            for joint_positions in self.target_joint_positions
+        ]
+        self.mean_torque = np.mean(torques)
+        self.std_torque = np.std(torques)
 
         # Compute the Global Conditioning Index (GCI) for the kinematic chain.
         self.global_conditioning_index = self.compute_global_conditioning_index(num_samples=50)
@@ -177,10 +212,18 @@ class KinematicChainPyBullet(KinematicChainBase):
         # Compute the manipulability score and delta joint score using resolved-rate motion control.
         final_configs, manip_scores, delta_joint_scores, pose_errors_rrmc = zip(*[self.compute_resolved_rate_motion_control_fitness(target) for target in targets])
         self.mean_manip_score_rrmc = np.mean(manip_scores)
-        self.mean_delta_joint_score_rrmc = np.mean(delta_joint_scores)
-        self.mean_pos_error_rrmc = np.mean(pose_errors_rrmc[0])
-        self.mean_ori_error_rrmc = np.mean(pose_errors_rrmc[1])
+        self.std_manip_score_rrmc = np.std(manip_scores)
 
+        self.mean_delta_joint_score_rrmc = np.mean(delta_joint_scores)
+        self.std_delta_joint_score_rrmc = np.std(delta_joint_scores)
+
+        # pose_errors_rrmc is a tuple of two sequences: (pos_errors, ori_errors)
+        self.mean_pos_error_rrmc = np.mean(pose_errors_rrmc[0])
+        self.std_pos_error_rrmc = np.std(pose_errors_rrmc[0])
+
+        self.mean_ori_error_rrmc = np.mean(pose_errors_rrmc[1])
+        self.std_ori_error_rrmc = np.std(pose_errors_rrmc[1])
+        
     def compute_pose_fitness(self, target_pose):
         """
         Compute the fitness of the robot's configuration by solving the inverse kinematics (IK) problem.
@@ -200,7 +243,7 @@ class KinematicChainPyBullet(KinematicChainBase):
                IK computation, a large fitness value (1e6) is returned.
         """
         # Step 4: Compute IK
-        joint_config = self.robot.inverse_kinematics(target_pose, pos_tol=0.01, rest_config=self.robot.home_config, max_iter=200, resample=True)
+        joint_config = self.robot.inverse_kinematics(target_pose, pos_tol=0.01, rest_config=self.robot.home_config, max_iter=200)
         
         # drive the robot to that config (for measurement)
         self.robot.set_joint_configuration(joint_config)
@@ -234,6 +277,7 @@ class KinematicChainPyBullet(KinematicChainBase):
         if path is None:
             # return 1e3   # no collision-free path found
             return 1.1 * self.max_rrt_cost_seen
+            # return 10 # TODO: this is a placeholder for no path found. not exactly sure what to set it to
 
         # path cost = sum of successive L2 distances
         cost = 0.0

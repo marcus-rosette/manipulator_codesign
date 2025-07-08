@@ -22,7 +22,8 @@ from pymoo.core.callback import Callback
 from manipulator_codesign.moo_decoder import decode_decision_vector
 from manipulator_codesign.urdf_to_decision_vector import encode_seed, urdf_to_decision_vector, load_seeds
 from manipulator_codesign.kinematic_chain import KinematicChainPyBullet
-import manipulator_codesign.orchard_workspace as orchard_ws
+from manipulator_codesign.pose_generation import sample_collision_free_poses
+from manipulator_codesign.training_env import load_plant_env
 from pybullet_robokit.load_objects import LoadObjects
 
 
@@ -144,35 +145,20 @@ class Evaluator:
         self.p.setAdditionalSearchPath(pybullet_data.getDataPath())
         self.p.setGravity(0, 0, -9.81)
 
-        # single‐time mesh load
-        self.collision_dim = [2, 0.3, 0.125]
-        self.collision_id = self.p.createCollisionShape(
-            shapeType=self.p.GEOM_BOX,
-            halfExtents=self.collision_dim
-        )
         self.mobile_base_translation = mobile_base_translation
         self.flags = flags
 
     def evaluate(self, x, targets, targets_offset,
                  robot_translation, min_j, max_j,
                  alpha, beta, delta, gamma):
-        p = self.p       
+        p = self.p 
+        p.setGravity(0, 0, -9.81)      
 
         # load robot
         object_loader = LoadObjects(p)
 
-        # load collision object rows
-        row_left_id = self.p.createMultiBody(
-            baseMass=0,
-            baseCollisionShapeIndex=self.collision_id,
-            basePosition=[0, -(self.collision_dim[1] + self.collision_dim[1]/2), self.collision_dim[2]]
-        )
-        row_right_id = self.p.createMultiBody(
-            baseMass=0,
-            baseCollisionShapeIndex=self.ollision_id,
-            basePosition=[0, (self.collision_dim[1] + self.collision_dim[1]/2), self.collision_dim[2]]
-        )
-        object_loader.collision_objects.extend([row_left_id, row_right_id])
+        # Load a new environment with plant objects
+        object_loader.collision_objects.extend(load_plant_env(p))
 
         # decode and build kinematic chain
         n, types, axes, lengths = decode_decision_vector(x, min_j, max_j)
@@ -184,7 +170,11 @@ class Evaluator:
         if not ch.is_built:
             ch.build_robot()
         ch.load_robot()
-        ch.compute_chain_metrics(targets, targets_offset)
+
+        # Sample collision-free poses (target points with orientations)
+        target_poses = sample_collision_free_poses(ch.robot, object_loader.collision_objects, target_points=targets, num_orientations=1000)
+
+        ch.compute_chain_metrics(target_poses, targets_offset)
 
         # cleanup
         p.resetSimulation()
@@ -364,14 +354,14 @@ if __name__ == "__main__":
     ##########################################################
     ################### INTPUT PARAMETERS ####################
     # set up operators
-    min_joints = 4
+    min_joints = 5
     max_joints = 7
-    num_generations = 20
-    num_population = 16
-    joint_type_search = [1] # 0: prismatic, 1: revolute, 2: spherical --- Typical range [0, 1, 2]
+    num_generations = 1000
+    num_population = 64
     joint_axis_search = [0, 1, 2] # 0: x, 1: y, 2: z
+    joint_type_search = [1] # 0: prismatic, 1: revolute, 2: spherical --- Typical range [0, 1, 2]
     link_length_search = [0.05, 0.2] # range in meters
-    nun_calibration_samples = 3
+    nun_calibration_samples = 20
     num_actors = os.cpu_count() // 2  # tune this to control memory vs. throughput
     ray.init(num_cpus=num_actors) # Intialize Ray with the number of actors (cpus)
 
@@ -392,15 +382,38 @@ if __name__ == "__main__":
     lower_parameter_search_bound = [min_joints] + [joint_type_search[0],joint_axis_search[0],link_length_search[0]] * max_joints
     upper_parameter_search_bound = [max_joints] + [joint_type_search[-1],joint_axis_search[-1],link_length_search[-1]] * max_joints
 
-    num_points_per_band = 10
-    x_bounds = (-0.8, 0.8)
-    y_band_bounds = [(-0.75, -0.15), (0.15, 0.75)]
-    z_value = 0.27
-    x = np.random.uniform(*x_bounds, (2, num_points_per_band))
-    y = np.array([np.random.uniform(low, high, num_points_per_band) for (low, high) in y_band_bounds])
-    z = np.full((2, num_points_per_band), z_value)
-    target_points = np.vstack([np.column_stack((x[i], y[i], z[i])) for i in range(2)])
+    # num_points_per_band = 5
+    # x_bounds = (-0.8, 0.8)
+    # y_band_bounds = [(-0.75, -0.15), (0.15, 0.75)]
+    # z_value = 0.27
+    # x = np.random.uniform(*x_bounds, (2, num_points_per_band))
+    # y = np.array([np.random.uniform(low, high, num_points_per_band) for (low, high) in y_band_bounds])
+    # z = np.full((2, num_points_per_band), z_value)
+    # target_points = np.vstack([np.column_stack((x[i], y[i], z[i])) for i in range(2)])
     target_offset_pts = None
+    target_points = np.array([
+            # [-0.75, -0.56, 0.28],
+            # [-0.7, -0.38, 0.28],
+            # [-0.49, -0.34 , 0.28],
+            # [-0.20, -0.50, 0.28],
+            # [-0.08, -0.57, 0.28],
+            [0.08, -0.35, 0.28],
+            [0.03, -0.2, 0.28],
+            [0.15, -0.7, 0.28],
+            [0.25, -0.15, 0.28],
+            [0.48, -0.35, 0.28],
+
+            [0.75, 0.56, 0.28],
+            [0.7, 0.38, 0.28],
+            [0.49, 0.34 , 0.28],
+            [0.20, 0.50, 0.28],
+            [0.08, 0.57, 0.28],
+            # [-0.08, 0.35, 0.28],
+            # [-0.03, 0.2, 0.28],
+            # [-0.15, 0.7, 0.28],
+            # [-0.25, 0.15, 0.28],
+            # [-0.48, 0.35, 0.28],
+            ])
     ##########################################################
     ##########################################################
 

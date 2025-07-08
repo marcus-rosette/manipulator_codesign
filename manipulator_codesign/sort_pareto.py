@@ -9,7 +9,7 @@ from manipulator_codesign.kinematic_chain import KinematicChainPyBullet
 from manipulator_codesign.urdf_gen import URDFGen
 
 # 1) Load your results
-with open('/home/marcus/agrobotics/manipulator_codesign/data/nsga2_results/results_20250627_151056.pkl', 'rb') as f:
+with open('/home/marcus/agrobotics/manipulator_codesign/data/nsga2_results/results_20250705_072638.pkl', 'rb') as f:
     data = pickle.load(f)
 X = data['X']         # shape (n_solutions, n_vars)
 F = data['F']         # shape (n_solutions, n_objs)
@@ -23,12 +23,12 @@ df = pd.DataFrame(F, columns=obj_names)
 
 # 3) Sort by the three you care about
 df_sorted = df.sort_values(
-    by=['rrt_path_cost', 'pose_error', 'joint_count'],
-    ascending=[True, True, False]   # descending on joint_count
+    by=['pose_error', 'rrt_path_cost'],
+    ascending=[True, True]   # descending on joint_count
 )
 
 # 4) Pick top performers
-top = df_sorted.head(10)
+top = df_sorted.head(25)
 top_X = X[top.index, :]
 
 print("Top 5 (min pose_error, min cond_idx, max joint_count):")
@@ -41,7 +41,7 @@ print(top)
 pyb = PybUtils(renders=False)
 object_loader = LoadObjects(pyb.con)
 
-num_joints, joint_types, joint_axes, link_lengths = decode_decision_vector(top_X[6], 4, 7)
+num_joints, joint_types, joint_axes, link_lengths = decode_decision_vector(top_X[9], 5, 7)
 print(f"Number of joints: {num_joints}")
 print(f"Joint types: {joint_types}")
 print(f"Joint axes: {joint_axes}")
