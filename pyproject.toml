@@ -17,14 +17,14 @@ description = "A PyBullet package for simulating a scene and controlling a robot
 requires-python = ">=3.8"
 dependencies = [
     "numpy",
-    "opencv-python",
-    "pybullet",
-    "pybullet_planning",
     "pyyaml",
     "matplotlib",
     "scipy",
-    "open3d",
     "spatialmath-python",
-    "roboticstoolbox-python",
     "tabulate",
+    "pymoo",
+    "ray",
+    "pandas",
+    "wandb",
+    "optuna",
 ]
