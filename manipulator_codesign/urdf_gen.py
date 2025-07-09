@@ -255,8 +255,8 @@ class URDFGen:
             self.create_link(
                 name=ball_joint_link_name,
                 type='cylinder',
-                link_len=0.125,
-                link_width=0.06,
+                link_len=0.06,
+                link_width=0.03,
                 mass=0,
                 origin=origin,
                 material=color_name,
@@ -353,14 +353,15 @@ class URDFGen:
         Returns:
             None
         """
+        probe_length = 0.1
         # Create a probe end effector
         self.robot.append(self.create_joint('probe_joint', parent, 'probe_link', [0, 0, last_link_length, 0, 0, 0], 'fixed'))
-        self.robot.append(self.create_link('probe_link', link_len=0.1, link_width=0.01, mass=0, collision=False))
+        self.robot.append(self.create_link('probe_link', link_len=probe_length, link_width=0.005, mass=0, collision=False))
 
-        self.robot.append(self.create_joint('end_effector_joint', 'probe_link', 'end_effector', [0, 0, 0.1, 0, 0, 0], 'fixed'))
+        self.robot.append(self.create_joint('end_effector_joint', 'probe_link', 'end_effector', [0, 0, probe_length/2, 0, 0, 0], 'fixed'))
         self.robot.append(self.create_link('end_effector', link_len=0, link_width=0, mass=0, collision=False))
     
-    def create_manipulator(self, axes, joint_types, link_lens, joint_lims, link_width=0.05, link_shape='cylinder', collision=False, gripper=False):
+    def create_manipulator(self, axes, joint_types, link_lens, joint_lims, link_width=0.025, link_shape='cylinder', collision=False, gripper=False):
         """
         Creates a manipulator robot model with specified parameters.
 
@@ -385,13 +386,13 @@ class URDFGen:
         self.robot.append(
             self.create_link(name=base_link_name, 
                              type='box', 
-                             link_len=base_link_size,
+                             link_len=base_link_size * 3,
                              link_width=base_link_size,
                              link_height=base_link_size,
                              mass=1,
                              material='gray', 
                              color=[0.5, 0.5, 0.5, 1], 
-                             collision=False))
+                             collision=True))
         
         parent_name = base_link_name
         parent_length = base_link_size / 2
@@ -422,7 +423,7 @@ class URDFGen:
                                     origin=[0, 0, parent_length, 0, 0, 0]))
             
             if joint_type == 'spherical':
-                sphere_radius = 0.1
+                sphere_radius = 0.05
                 spherical_joint, sphere_link = self.add_mock_spherical_joint(
                                                     parent=parent_name,
                                                     radius=sphere_radius,
@@ -582,7 +583,7 @@ class URDFGen:
         elif type == 'sphere':
             ixx = (2/5) * mass * link_width**2
             iyy = (2/5) * mass * link_width**2
-            izz = (2/5) * mass * link_width**2
+            izz = (2/5) * mass * link_width**2                      
         else:
             raise ValueError("Unsupported shape type for inertia calculation.")
 
@@ -596,11 +597,11 @@ if __name__ == '__main__':
     robot_name = 'test_robot'
     urdf_gen = URDFGen(robot_name)
 
-    joint_types = [2,0,2,0,2]
-    axes = [0,2,0,2,0]
-    link_lens = [0.75, 0.75, 0.5, 0.5, 0.4]
+    joint_types = [0, 0]
+    axes = [0, 1]
+    link_lens = [0.03, 0.2] 
 
-    joint_limit_prismatic = (-0.5, 0.5)
+    joint_limit_prismatic = (-0.1, 0.1)
     joint_limit_revolute = (-3.14, 3.14)
 
     # Map joint limits based on joint type

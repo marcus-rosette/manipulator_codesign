@@ -1,4 +1,5 @@
 import numpy as np
+import os
 import xml.etree.ElementTree as ET
 
 from pybullet_robokit.pyb_utils import PybUtils
@@ -54,7 +55,7 @@ def get_logical_joints(robot):
             seen.add(j)
     return logical
 
-def urdf_to_decision_vector(urdf_path):
+def urdf_to_decision_vector(urdf_path, ee_link_name='end_effector'):
     # 1) load robot and let it detect spherical groups
     pyb = PybUtils(renders=False)
     robot = LoadRobot(
@@ -64,7 +65,7 @@ def urdf_to_decision_vector(urdf_path):
         pyb.con.getQuaternionFromEuler([0, 0, 0]),
         home_config=None,
         collision_objects=[],
-        ee_link_name='end_effector',
+        ee_link_name=ee_link_name,
     )
 
     # 2) parse URDF once for true cylinder lengths
@@ -91,6 +92,10 @@ def urdf_to_decision_vector(urdf_path):
             types.append('revolute' if info[2] == pyb.con.JOINT_REVOLUTE else 'prismatic')
             axes.append(tuple(info[13]))
             lengths.append(get_link_length(robot, item, cylinder_lengths))
+
+    # Replace any list of tuples, spherical logical joint, with (0, 0, 0)
+    axes = [(0.0, 0.0, 0.0) if isinstance(item, list) and all(isinstance(subitem, tuple) for subitem in item) else item
+                for item in axes]
 
     return len(types), types, axes, lengths
 
@@ -136,9 +141,17 @@ def encode_seed(dec_vec, min_joints=4, max_joints=7):
 
     return np.asarray(vec, dtype=float)
 
+def load_seeds(urdf_dir, max_joints=7):
+    """
+    Load and encode all URDF seed files in `urdf_dir`.
+    """
+    urdfs = [os.path.join(urdf_dir, f) for f in os.listdir(urdf_dir) if f.endswith('.urdf')]
+    raw = [urdf_to_decision_vector(u) for u in urdfs]
+    return [encode_seed(s, max_joints=max_joints) for s in raw]
+
 
 if __name__ == "__main__":
-    urdf_path = "manipulator_codesign/urdf/robots/nsga2_seeds/gen_seed_7.urdf"
+    urdf_path = "manipulator_codesign/urdf/robots/nsga2_seeds/gen_seed_9.urdf"
     total_joint_count, joint_types, joint_axes, link_lengths = urdf_to_decision_vector(
         urdf_path
     )
@@ -146,6 +159,9 @@ if __name__ == "__main__":
     joint_axes = [(0.0, 0.0, 0.0) if isinstance(item, list) and all(isinstance(subitem, tuple) for subitem in item) else item
                 for item in joint_axes]
     print("Total joints in the system:", total_joint_count)
+    joint_types = [URDFGen.map_joint_type_inverse(jt) for jt in joint_types]
     print("Joint types:", joint_types)
+    joint_axes = [' '.join(map(str, map(int, ja))) for ja in joint_axes]
+    joint_axes = [URDFGen.map_axis_inverse(ja) for ja in joint_axes]
     print("Joint axes:", joint_axes)
     print("Link lengths:", link_lengths)

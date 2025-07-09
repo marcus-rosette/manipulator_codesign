@@ -20,8 +20,10 @@ from pymoo.optimize import minimize
 from pymoo.core.callback import Callback 
 
 from manipulator_codesign.moo_decoder import decode_decision_vector
-from manipulator_codesign.urdf_to_decision_vector import encode_seed, urdf_to_decision_vector
+from manipulator_codesign.urdf_to_decision_vector import encode_seed, urdf_to_decision_vector, load_seeds
 from manipulator_codesign.kinematic_chain import KinematicChainPyBullet
+from manipulator_codesign.pose_generation import sample_collision_free_poses
+from manipulator_codesign.training_env import load_plant_env
 from pybullet_robokit.load_objects import LoadObjects
 
 
@@ -129,65 +131,95 @@ class MixedMutation(Mutation):
         return Y
 
 
-# -------- Remote Evaluation --------
+# -------- Ray Actor for Persistent Evaluation --------
 @ray.remote
-def evaluate_individual(x, targets, min_j, max_j, alpha, beta, delta, gamma):
-    import pybullet as p, pybullet_data
-    c = p.connect(p.DIRECT)
-    p.setAdditionalSearchPath(pybullet_data.getDataPath())
-    p.setGravity(0, 0, -9.81)
+class Evaluator:
+    def __init__(self,
+                 mesh_path: str,
+                 robot_urdf: str,
+                 mobile_base_translation,
+                 flags: int):
+        import pybullet as p, pybullet_data
+        self.p = p
+        self.p.connect(p.DIRECT)
+        self.p.setAdditionalSearchPath(pybullet_data.getDataPath())
+        self.p.setGravity(0, 0, -9.81)
 
-    object_loader = LoadObjects(p)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    urdf_dir = os.path.join(script_dir, 'urdf', 'trees')
-    flags = 0 #self.pyb.con.URDF_MERGE_FIXED_LINKS
-    tree_id = object_loader.load_urdf(os.path.join(urdf_dir, "v_trellis_template_inertial.urdf"),
-                                    start_pos=[0, 1, 0], 
-                                    start_orientation=[0, 0, 0], 
-                                    fix_base=True,
-                                    flags=flags)
-    object_loader.collision_objects.append(tree_id)
+        self.mobile_base_translation = mobile_base_translation
+        self.flags = flags
 
-    n, types, axes, lengths = decode_decision_vector(x, min_j, max_j)
-    ch = KinematicChainPyBullet(p, n, types, axes, lengths, collision_objects=object_loader.collision_objects)
+    def evaluate(self, x, targets, targets_offset,
+                 robot_translation, min_j, max_j,
+                 alpha, beta, delta, gamma):
+        p = self.p 
+        p.setGravity(0, 0, -9.81)      
 
-    if not ch.is_built:
-        ch.build_robot()
-    ch.load_robot()
-    ch.compute_chain_metrics(targets)
-    metrics = {
-        'pose_error': ch.mean_pose_error,
-        'rrt_path_cost': ch.mean_rrt_path_cost,
-        'torque': ch.mean_torque,
-        'joint_count': ch.num_joints,
-        'conditioning_index': ch.global_conditioning_index,
-        'delta_joint_score_rrmc': ch.mean_delta_joint_score_rrmc,
-        'pos_error_rrmc': ch.mean_pos_error_rrmc
-    }
-    p.resetSimulation()
-    p.disconnect(c)
-    return metrics
+        # load robot
+        object_loader = LoadObjects(p)
+
+        # Load a new environment with plant objects
+        object_loader.collision_objects.extend(load_plant_env(p))
+
+        # decode and build kinematic chain
+        n, types, axes, lengths = decode_decision_vector(x, min_j, max_j)
+        ch = KinematicChainPyBullet(
+            p, robot_translation,
+            n, types, axes, lengths,
+            collision_objects=object_loader.collision_objects
+        )
+        if not ch.is_built:
+            ch.build_robot()
+        ch.load_robot()
+
+        # Sample collision-free poses (target points with orientations)
+        target_poses = sample_collision_free_poses(ch.robot, object_loader.collision_objects, target_points=targets, num_orientations=1000)
+
+        ch.compute_chain_metrics(target_poses, targets_offset)
+
+        # cleanup
+        p.resetSimulation()
+
+        return {
+            'pose_error':             ch.mean_pose_error,
+            'rrt_path_cost':          ch.mean_rrt_path_cost,
+            'torque':                 ch.mean_torque,
+            'joint_count':            ch.num_joints,
+            'conditioning_index':     ch.global_conditioning_index,
+            'delta_joint_score_rrmc': ch.mean_delta_joint_score_rrmc,
+            'pos_error_rrmc':         ch.mean_pos_error_rrmc
+        }
 
 
 # -------- Problem Definition --------
 class KinematicChainProblem(Problem):
-    def __init__(self, targets, seeds, min_joints=2, max_joints=7,
-                 alpha=1, beta=1, delta=1, gamma=1, cal_samples=15):
+    def __init__(self, targets, targets_offset, robot_translation, mobile_base_translation,
+                 xl, xu, seeds, min_joints=2, max_joints=7,
+                 alpha=1, beta=1, delta=1, gamma=1,
+                 cal_samples=15, num_actors=4):
         print("[KinematicChainProblem] Initializing and calibrating...")
-        self.targets = np.array(targets)
+        self.targets = targets
+        self.targets_offset = targets_offset
+        self.robot_translation = np.asarray(robot_translation, dtype=float)
+        self.mobile_base_translation = np.asarray(mobile_base_translation, dtype=float)
         self.min_joints, self.max_joints = min_joints, max_joints
         self.alpha, self.beta, self.delta, self.gamma = alpha, beta, delta, gamma
-        n_obj = 6
 
-        xl = [min_joints] + [0, 0, 0.05] * max_joints
-        xu = [max_joints] + [2, 2, 0.75] * max_joints
-        super().__init__(n_var=len(xl), n_obj=n_obj,
-                         xl=np.array(xl), xu=np.array(xu))
+        super().__init__(n_var=len(xl), n_obj=6, xl=np.array(xl), xu=np.array(xu))
 
-        # build calibration batch mixing seeds + random
         self._x_cal = self._make_calibration_batch(seeds, cal_samples)
 
-        # now run calibration
+        # create a pool of Evaluator actors
+        flags = 0
+        self.actors = [
+            Evaluator.options(max_concurrency=1).remote(
+                mesh_path="",
+                robot_urdf="",
+                mobile_base_translation=self.mobile_base_translation,
+                flags=flags
+            )
+            for _ in range(num_actors)
+        ]
+
         self._parallel_calibration()
 
     def _make_calibration_batch(self, seeds, cal_samples):
@@ -213,41 +245,54 @@ class KinematicChainProblem(Problem):
 
     def _parallel_calibration(self):
         print("[Calibration] Running parallel calibration samples...")
-        res = ray.get([
-            evaluate_individual.remote(x, self.targets,
-                                       self.min_joints, self.max_joints,
-                                       self.alpha, self.beta,
-                                       self.delta, self.gamma)
-            for x in self._x_cal
-        ])
+        # round-robin assignment
+        futures = []
+        for i, x in enumerate(self._x_cal):
+            actor = self.actors[i % len(self.actors)]
+            futures.append(actor.evaluate.remote(
+                x, self.targets, self.targets_offset,
+                self.robot_translation,
+                self.min_joints, self.max_joints,
+                self.alpha, self.beta, self.delta, self.gamma
+            ))
+        res = ray.get(futures)
+
         def bounds(arr):
             lo, hi = min(arr), max(arr)
-            return (lo, hi if hi > lo else lo + 1e-6)
-        self.pose_bounds    = bounds([r['pose_error'] for r in res])
-        self.rrt_bounds     = bounds([r['rrt_path_cost'] for r in res])
-        self.torque_bounds  = bounds([r['torque'] for r in res])
-        self.delta_bounds   = bounds([r['delta_joint_score_rrmc'] for r in res])
-        self.pos_bounds     = bounds([r['pos_error_rrmc'] for r in res])
-        self.jcount_bounds  = bounds([r['joint_count'] for r in res])
+            return (lo, hi if hi>lo else lo+1e-6)
+
+        self.pose_bounds   = bounds([r['pose_error'] for r in res])
+        self.rrt_bounds    = bounds([r['rrt_path_cost'] for r in res])
+        self.torque_bounds = bounds([r['torque'] for r in res])
+        self.delta_bounds  = bounds([r['delta_joint_score_rrmc'] for r in res])
+        self.pos_bounds    = bounds([r['pos_error_rrmc'] for r in res])
+        self.jcount_bounds = bounds([r['joint_count'] for r in res])
 
     def _evaluate(self, X, out, *args, **kwargs):
-        res = ray.get([
-            evaluate_individual.remote(X[i], self.targets,
-                                       self.min_joints, self.max_joints,
-                                       self.alpha, self.beta,
-                                       self.delta, self.gamma)
-            for i in range(X.shape[0])
-        ])
+        futures = []
+        for i in range(X.shape[0]):
+            actor = self.actors[i % len(self.actors)]
+            futures.append(actor.evaluate.remote(
+                X[i], self.targets, self.targets_offset,
+                self.robot_translation,
+                self.min_joints, self.max_joints,
+                self.alpha, self.beta, self.delta, self.gamma
+            ))
+        res = ray.get(futures)
+
+        # assemble F just as before…
         F = np.zeros((X.shape[0], self.n_obj))
         def lin(v, lo, hi):
             return np.clip((v - lo) / max(1e-8, hi - lo), 0, 1)
+
         for i, r in enumerate(res):
-            p_lo, p_hi = self.pose_bounds
+            p_lo, p_hi   = self.pose_bounds
             rr_lo, rr_hi = self.rrt_bounds
-            t_lo, t_hi = self.torque_bounds
-            d_lo, d_hi = self.delta_bounds
+            t_lo, t_hi   = self.torque_bounds
+            d_lo, d_hi   = self.delta_bounds
             pr_lo, pr_hi = self.pos_bounds
             jc_lo, jc_hi = self.jcount_bounds
+
             F[i, 0] = self.alpha * lin(r['pose_error'], p_lo, p_hi)
             F[i, 1] = self.beta  * lin(r['torque'], t_lo, t_hi)
             F[i, 2] = self.delta * lin(r['joint_count'], jc_lo, jc_hi)
@@ -260,8 +305,8 @@ class KinematicChainProblem(Problem):
             # in _evaluate, replace the two objectives at indices 4,5 with one:
             F[i, 4] = (w_delta_rrmc * lin(r['delta_joint_score_rrmc'], d_lo, d_hi)
                        + w_pos_rrmc   * lin(r['pos_error_rrmc'],      pr_lo, pr_hi))
-
             F[i, 5] = lin(r['rrt_path_cost'], rr_lo, rr_hi)
+
         out["F"] = F
 
 
@@ -306,24 +351,83 @@ if __name__ == "__main__":
     use_wandb = args.wandb
     use_mixed = args.mixed
 
-    ray.init(num_cpus=os.cpu_count())
-
+    ##########################################################
+    ################### INTPUT PARAMETERS ####################
     # set up operators
+    min_joints = 5
     max_joints = 7
-    num_generations = 10
-    num_population = 15
-    num_target_pts = 5
+    num_generations = 1000
+    num_population = 64
+    joint_axis_search = [0, 1, 2] # 0: x, 1: y, 2: z
+    joint_type_search = [1] # 0: prismatic, 1: revolute, 2: spherical --- Typical range [0, 1, 2]
+    link_length_search = [0.05, 0.2] # range in meters
+    nun_calibration_samples = 20
+    num_actors = os.cpu_count() // 2  # tune this to control memory vs. throughput
+    ray.init(num_cpus=num_actors) # Intialize Ray with the number of actors (cpus)
+
     var_types = ['int'] + ['int','int','real'] * max_joints
 
     # Find the urdf seeds
     script_dir = os.path.dirname(os.path.abspath(__file__))
     urdf_dir = os.path.join(script_dir, 'urdf', 'robots', 'nsga2_seeds')
-    urdfs = [os.path.join(urdf_dir, f) for f in os.listdir(urdf_dir) if f.endswith('.urdf')]
-    raw_seeds = [urdf_to_decision_vector(u) for u in urdfs]
-    seeds     = [encode_seed(s, max_joints=max_joints) for s in raw_seeds]
+    seeds = load_seeds(urdf_dir, max_joints=max_joints)
 
-    targets = np.random.uniform([-2,0,0],[2,2,2],(num_target_pts,3)).tolist()
-    problem = KinematicChainProblem(targets, seeds=seeds, cal_samples=15)
+    # Set the robot starting position and translation
+    robot_to_amiga_translation = [0, 0, 0]
+    amiga_to_robot_translation = [0, 0, 0]
+    robot_system_translation = [0, 0, 0.125]
+    robot_translation = np.add(robot_to_amiga_translation, robot_system_translation)
+    amiga_translation = np.add(amiga_to_robot_translation, robot_system_translation)
+
+    lower_parameter_search_bound = [min_joints] + [joint_type_search[0],joint_axis_search[0],link_length_search[0]] * max_joints
+    upper_parameter_search_bound = [max_joints] + [joint_type_search[-1],joint_axis_search[-1],link_length_search[-1]] * max_joints
+
+    # num_points_per_band = 5
+    # x_bounds = (-0.8, 0.8)
+    # y_band_bounds = [(-0.75, -0.15), (0.15, 0.75)]
+    # z_value = 0.27
+    # x = np.random.uniform(*x_bounds, (2, num_points_per_band))
+    # y = np.array([np.random.uniform(low, high, num_points_per_band) for (low, high) in y_band_bounds])
+    # z = np.full((2, num_points_per_band), z_value)
+    # target_points = np.vstack([np.column_stack((x[i], y[i], z[i])) for i in range(2)])
+    target_offset_pts = None
+    target_points = np.array([
+            # [-0.75, -0.56, 0.28],
+            # [-0.7, -0.38, 0.28],
+            # [-0.49, -0.34 , 0.28],
+            # [-0.20, -0.50, 0.28],
+            # [-0.08, -0.57, 0.28],
+            [0.08, -0.35, 0.28],
+            [0.03, -0.2, 0.28],
+            [0.15, -0.7, 0.28],
+            [0.25, -0.15, 0.28],
+            [0.48, -0.35, 0.28],
+
+            [0.75, 0.56, 0.28],
+            [0.7, 0.38, 0.28],
+            [0.49, 0.34 , 0.28],
+            [0.20, 0.50, 0.28],
+            [0.08, 0.57, 0.28],
+            # [-0.08, 0.35, 0.28],
+            # [-0.03, 0.2, 0.28],
+            # [-0.15, 0.7, 0.28],
+            # [-0.25, 0.15, 0.28],
+            # [-0.48, 0.35, 0.28],
+            ])
+    ##########################################################
+    ##########################################################
+
+    problem = KinematicChainProblem(
+        targets=target_points,
+        targets_offset=target_offset_pts,
+        robot_translation=robot_translation,
+        mobile_base_translation=amiga_translation,
+        xl=lower_parameter_search_bound,
+        xu=upper_parameter_search_bound,
+        seeds=seeds,
+        cal_samples=nun_calibration_samples,
+        num_actors=num_actors
+    )
 
     callback = None
     if use_wandb:
@@ -353,7 +457,6 @@ if __name__ == "__main__":
 
     # algorithm selection
     if use_mixed:
-        print('using mixed')
         sampling  = SeededSampling(var_types, seeds, MixedSampling(var_types))
         crossover = MixedCrossover(var_types)
         mutation  = MixedMutation(var_types,
@@ -367,7 +470,6 @@ if __name__ == "__main__":
             eliminate_duplicates=True
         )
     else:
-        print('using basic')
         algo = NSGA2(
             pop_size=num_population,
             sampling=LatinHypercubeSampling(),
@@ -390,8 +492,9 @@ if __name__ == "__main__":
     res = minimize(**minimize_kwargs)
 
     # save results locally
-    os.makedirs('data/nsga2_results', exist_ok=True)
-    fn = os.path.join('data', f"results_{datetime.now():%Y%m%d_%H%M%S}.pkl")
+    data_dir = 'data/nsga2_results'
+    os.makedirs(data_dir, exist_ok=True)
+    fn = os.path.join(data_dir, f"results_{datetime.now():%Y%m%d_%H%M%S}.pkl")
     with open(fn, 'wb') as f:
         pickle.dump({'X': res.X, 'F': res.F}, f)
     print(f"Saved results to {fn}")

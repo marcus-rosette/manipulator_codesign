@@ -108,12 +108,13 @@ class KinematicChainBase:
 
 # --- PyBullet Implementation ---
 class KinematicChainPyBullet(KinematicChainBase):
-    def __init__(self, pyb_con, num_joints, joint_types, joint_axes, link_lengths, ee_link_name='end_effector', collision_objects=[], **kwargs):
+    def __init__(self, pyb_con, start_position, num_joints, joint_types, joint_axes, link_lengths, ee_link_name='end_effector', collision_objects=[], **kwargs):
         """
         pyb_con: A connection object from your PyBullet utilities.
         """
         super().__init__(num_joints, joint_types, joint_axes, link_lengths, **kwargs)
         self.pyb_con = pyb_con
+        self.start_position = start_position
         self.ee_link_name = ee_link_name
         self.urdf_path = None
         self.robot = None
@@ -133,6 +134,7 @@ class KinematicChainPyBullet(KinematicChainBase):
         self.is_loaded = False
 
         self.default_joint_config = [0.0] * self.num_joints
+        self.max_rrt_cost_seen = 10.0
 
     def build_robot(self):
         # Create a URDF for this chain.
@@ -145,7 +147,7 @@ class KinematicChainPyBullet(KinematicChainBase):
         # Load the robot into PyBullet.
         self.robot = LoadRobot(self.pyb_con, 
                                self.urdf_path, 
-                               start_pos=[0, 0, 0], 
+                               start_pos=self.start_position, 
                                start_orientation=self.pyb_con.getQuaternionFromEuler([0, 0, 0]),
                                home_config=self.default_joint_config,
                                ee_link_name=self.ee_link_name,
@@ -155,16 +157,54 @@ class KinematicChainPyBullet(KinematicChainBase):
         # Initialize motion planner
         self.motion_planner = KinematicChainMotionPlanner(self.robot)
 
-    def compute_chain_metrics(self, targets):
+    def sample_collision_free_poses(self, pose_candidates):
+        target_poses = []
+        target_joint_configs = []
+
+        for target_candidate in pose_candidates:
+            for j, target_pose in enumerate(target_candidate):
+                target_pose = tuple(target_pose)
+                joint_config = self.robot.inverse_kinematics(target_pose)
+                self.robot.reset_joint_positions(joint_config)
+                if not self.robot.collision_check(self.robot.robotId, self.collision_objects) and not self.robot.check_self_collision(joint_config):
+                    target_poses.append(target_pose)
+                    target_joint_configs.append(joint_config)
+                    # print(f"Found collision-free orientation for target point {target_candidate[0][0]} at index {j}.")
+                    break
+            else:
+                # If we never `break`, no collision-free orientation was found.
+                # Use the last pose's position but a default “front-facing (+y)” quaternion.
+                last_pose = target_candidate[-1]
+                pos = np.asarray(last_pose[0])
+                default_quat = np.array((1, 0, 0, 0))
+                fallback = (pos, default_quat)
+                target_poses.append(fallback)
+                target_joint_configs.append(joint_config)  # Use home config as fallback
+
+                # print(f"Warning: No collision-free orientation found for target point {target_candidate[0][0]}. Using fallback orientation.")
+
+        return target_poses, target_joint_configs
+
+    def compute_chain_metrics(self, targets, targets_offset):
         # Compute the mean pose error and mean torque for the given targets.
         pose_errors, self.target_joint_positions = zip(*[self.compute_pose_fitness(target) for target in targets])
         self.mean_pose_error = np.mean(pose_errors)
+        self.std_pose_error = np.std(pose_errors)
 
-        # Compute the rrt path cost for the target joint positions.
+        # Compute the rrt path cost for the target joint positions with the tree collision mesh.
         rrt_path_costs = [self.compute_rrt_path_cost(joint_positions, collision_objects=self.collision_objects) for joint_positions in self.target_joint_positions]
         self.mean_rrt_path_cost = np.mean(rrt_path_costs)
+        self.std_rrt_path_cost = np.std(rrt_path_costs)
 
-        self.mean_torque = np.mean([self.compute_gravity_torque_magnitute(joint_positions) for joint_positions in self.target_joint_positions])
+        # Remove the last collision object (assumed to be the tree mesh). This is necessary to get global metrics of torque, GCI, and manipulability.
+        self.pyb_con.removeBody(self.collision_objects[-1])  
+
+        torques = [
+            self.compute_gravity_torque_magnitute(joint_positions)
+            for joint_positions in self.target_joint_positions
+        ]
+        self.mean_torque = np.mean(torques)
+        self.std_torque = np.std(torques)
 
         # Compute the Global Conditioning Index (GCI) for the kinematic chain.
         self.global_conditioning_index = self.compute_global_conditioning_index(num_samples=50)
@@ -172,10 +212,18 @@ class KinematicChainPyBullet(KinematicChainBase):
         # Compute the manipulability score and delta joint score using resolved-rate motion control.
         final_configs, manip_scores, delta_joint_scores, pose_errors_rrmc = zip(*[self.compute_resolved_rate_motion_control_fitness(target) for target in targets])
         self.mean_manip_score_rrmc = np.mean(manip_scores)
-        self.mean_delta_joint_score_rrmc = np.mean(delta_joint_scores)
-        self.mean_pos_error_rrmc = np.mean(pose_errors_rrmc[0])
-        self.mean_ori_error_rrmc = np.mean(pose_errors_rrmc[1])
+        self.std_manip_score_rrmc = np.std(manip_scores)
 
+        self.mean_delta_joint_score_rrmc = np.mean(delta_joint_scores)
+        self.std_delta_joint_score_rrmc = np.std(delta_joint_scores)
+
+        # pose_errors_rrmc is a tuple of two sequences: (pos_errors, ori_errors)
+        self.mean_pos_error_rrmc = np.mean(pose_errors_rrmc[0])
+        self.std_pos_error_rrmc = np.std(pose_errors_rrmc[0])
+
+        self.mean_ori_error_rrmc = np.mean(pose_errors_rrmc[1])
+        self.std_ori_error_rrmc = np.std(pose_errors_rrmc[1])
+        
     def compute_pose_fitness(self, target_pose):
         """
         Compute the fitness of the robot's configuration by solving the inverse kinematics (IK) problem.
@@ -194,9 +242,8 @@ class KinematicChainPyBullet(KinematicChainBase):
         float: The computed fitness value. A lower value indicates a better fit. If an error occurs during
                IK computation, a large fitness value (1e6) is returned.
         """
-        # TODO: how much tolerance should we allow?
         # Step 4: Compute IK
-        joint_config = self.robot.inverse_kinematics(target_pose, pos_tol=0.01, rest_config=self.robot.home_config, max_iter=200, resample=True)
+        joint_config = self.robot.inverse_kinematics(target_pose, pos_tol=0.01, rest_config=self.robot.home_config, max_iter=200)
         
         # drive the robot to that config (for measurement)
         self.robot.set_joint_configuration(joint_config)
@@ -213,6 +260,9 @@ class KinematicChainPyBullet(KinematicChainBase):
             target_ori=target_quat,
             tol=0.0
             )
+            # e.g. weight orientation half as much as position
+            total_error = pos_err_norm + ori_err_angle
+            return total_error, joint_config
         else:
             return np.linalg.norm(np.array(target_pose) - np.array(ee_pos)), joint_config
         
@@ -225,12 +275,17 @@ class KinematicChainPyBullet(KinematicChainBase):
 
         path = self.motion_planner.rrt_path(home, target_config, collision_objects, rrt_iter=500)
         if path is None:
-            return 1e3   # no collision-free path found
+            # return 1e3   # no collision-free path found
+            return 1.1 * self.max_rrt_cost_seen
+            # return 10 # TODO: this is a placeholder for no path found. not exactly sure what to set it to
 
         # path cost = sum of successive L2 distances
         cost = 0.0
         for a, b in zip(path[:-1], path[1:]):
             cost += np.linalg.norm(np.array(a) - np.array(b))
+        
+        # update the maximum RRT cost seen so far
+        self.max_rrt_cost_seen = max(self.max_rrt_cost_seen, cost)
         return cost
     
     def compute_motion_plan_fitness(self, pose_waypoints):
@@ -329,12 +384,12 @@ class KinematicChainPyBullet(KinematicChainBase):
 
         return gravity_torque_magnitude
     
-    def compute_resolved_rate_motion_control_fitness(self, target_pos, max_steps=400, alpha=0.75, manipulability_gain=0.1, stall_vel_threshold=0.1, stall_patience=10):
+    def compute_resolved_rate_motion_control_fitness(self, target_pose, max_steps=400, alpha=0.75, manipulability_gain=0.1, stall_vel_threshold=0.1, stall_patience=10):
         """
         Compute the fitness of a resolved-rate motion control plan.
 
         Args:
-            target_pos (list): The desired target position.
+            target_pose (list): The desired target poses.
             max_steps (int): Maximum number of simulation steps.
             alpha (float): Weight for the manipulability term.
             manipulability_gain (float): Gain for the manipulability term.
@@ -344,14 +399,16 @@ class KinematicChainPyBullet(KinematicChainBase):
         Returns:
             tuple: Final joint configuration and fitness metrics.
         """
+        # target_pos, target_orientation = target_pose
+        target_pos, target_orientation = target_pose if len(target_pose) == 2 else (target_pose, None)
+
         # TODO: Add smart orientation selection based on target point. Currently only suited for approaches in positive y direction
         # Compute the target pose (position and orientation)
         target_orientations = [
             np.array([180, 0, 90]), # top-down (-z)
             np.array([90, 0, 180]), # front-back (+y)
-            np.array([0, 0, -90]), # bottom-up (+z)
             np.array([90, 0, -90]), # right-left (-x)
-            np.array([90, 0, 180]), # front-back (+y)
+            np.array([90, 0, 0]), # back-front (-y)
             np.array([90, 0, 90]), # left-right (+x)
         ]
 
